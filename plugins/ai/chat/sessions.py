@@ -20,6 +20,7 @@ from .identity import MemoryKey
 from .memory import Record, Store, empty_memory
 
 log = logging.getLogger(__name__)
+event_log = logging.getLogger("accbot.ai.chat.events")
 
 
 @dataclass
@@ -121,9 +122,15 @@ class Sessions:
     async def accept(self, event: MessageReceived, *, tools):
         message = event.message
         if self.closed or message.is_self or not self.plugin.allowed(message):
+            event_log.debug(
+                "AI message ignored: event=%s reason=closed_self_or_unconfigured model=%s",
+                event.event_id,
+                self.config.default_model,
+            )
             return
         channel = self.channel(message.conversation)
         if message.ref.id in channel.seen:
+            event_log.debug("AI message ignored: event=%s reason=duplicate", event.event_id)
             return
         channel.seen[message.ref.id] = None
         if len(channel.seen) > 2048:
@@ -140,12 +147,14 @@ class Sessions:
         mention = any(p.type == "mention" and p.user == event.connection.bot for p in message.content)
         explicit = owner or (mention and self.plugin.may_mention(message))
         if direct and not explicit:
+            event_log.debug("AI message ignored: event=%s reason=private_requires_mention", event.event_id)
             return
         if channel.session:
             record = channel.session.record
             record.waiting.append(entry.render(channel.known, self.visible_ids(record)))
             channel.store.journal(channel.records)
         awake = explicit
+        chance = None
         if not direct and not awake:
             active = channel.session is not None
             chance = (
@@ -156,6 +165,18 @@ class Sessions:
             awake = (
                 not active or now - channel.session.last_wake >= self.config.cooldown_seconds
             ) and self.dice() < chance
+        event_log.debug(
+            "AI wake decision: event=%s conversation=%s active=%s owner=%s mention=%s explicit=%s "
+            "probability=%s awake=%s",
+            event.event_id,
+            message.conversation.key,
+            channel.session is not None,
+            owner,
+            mention,
+            explicit,
+            chance,
+            awake,
+        )
         if not awake:
             return
         # Bound queued model requests without discarding already accepted transcripts.

@@ -27,6 +27,7 @@ accbot 是面向群体聊天的 Python AI 机器人框架。多个参与者、�
 - ModelItem 的发送者、时间、消息 ID、会话及单层引用是框架提供的可选结构化字段，由调用插件构造。模型层统一渲染并合并相邻普通 user 消息；system/developer、助手、工具及供应商续接项目保持边界和顺序。历史内容的稳定性由插件负责，不引入自动冻结会话状态。
 - 发送者及引用发送者显式标注用户 ID、平台和作用域。官方聊天插件从入站连接取得机器人自身账号，作为独立 system 资料并计入预算；身份判断规则仍通过可移除的插件提示词补充提供。
 - 平台独有消息和事件保留命名空间及结构化载荷，不静默丢弃。
+- OneBot 数组消息与 CQ 字符串映射到相同的内部消息链；正文、提及、引用和媒体保留语义，未知 CQ 段保留命名空间与参数。转义后的 CQ 字面文本不解释成提及或其他控制片段。
 
 ## 事件与分发
 
@@ -118,7 +119,7 @@ unload 是逻辑卸载；旧任务持有旧模块和对象直到完成。重新�
 | 配置、资源与业务文件 | [目录约定](directories.md)，`config/`、`personas/` |
 | 插件配置页面 | [前端接口](plugin-frontend.md)，`plugins/frontend.py`、`web/routes/plugin_ui.py` |
 | 默认聊天策略、记忆与工具 | [AI 插件](ai-plugins.md)，`plugins/ai/` |
-| OneBot 事件、API 与连接生命周期 | [OneBot 接入](onebot.md)、[OneBot 11 协议](https://github.com/botuniverse/onebot-11)，`adapters/onebot.py`、`adapters/onebot_ws.py` |
+| OneBot 消息解析、事件跟踪、API 与连接生命周期 | [OneBot 接入](onebot.md)、[OneBot 11 协议](https://github.com/botuniverse/onebot-11)，`adapters/onebot.py`、`adapters/onebot_message.py`、`adapters/onebot_ws.py` |
 
 除 `plugins/ai/` 外，表中源码路径相对 `src/accbot/`。
 
@@ -134,6 +135,7 @@ unload 是逻辑卸载；旧任务持有旧模块和对象直到完成。重新�
 - [x] 后台工具接受后可自然完成，结果与异常不会投递到新插件实例。
 - [x] OneBot 事件映射、发送回执、连接状态和未知结果有明确语义。
 - [x] 正向 WebSocket 支持认证、收发、重连及状态展示；停用和配置替换取消连接任务，回执可在事件积压时继续处理，断线不重发未确认操作。
+- [x] 数组与 CQ 字符串消息均通过正向 WebSocket、装饰器过滤、总线和实际 AI 插件完成唤醒与回复；转义文本不伪造提及。事件跟踪不输出消息正文或密钥。
 - [x] Chat/Responses 共用内部类型，保留工具关联、多模态与供应商续接项目。
 - [x] 相邻用户消息合并保留身份与引用，原生 JSON 输入绕过渲染及卡片注入。
 - [x] 卡片模板完全由用户控制，插件与工具补充按当前激活和工具集合注入。

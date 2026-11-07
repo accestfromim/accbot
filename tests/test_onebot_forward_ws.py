@@ -51,7 +51,7 @@ def test_forward_url_rejects_missing_address_and_embedded_credentials(url):
             cls(id="main", self_id="100", mode="forward_ws", ws_url=url)
 
 
-def test_forward_management_events_echo_and_backpressure(workspace):
+def test_forward_management_events_echo_and_backpressure(workspace, caplog):
     async def run():
         connections = asyncio.Queue()
         replied = asyncio.Event()
@@ -61,7 +61,13 @@ def test_forward_management_events_echo_and_backpressure(workspace):
 
         async def protocol(socket):
             await connections.put(socket)
-            for frame in ("invalid JSON", "[]", '{"post_type":"message"}', json.dumps(incoming())):
+            for frame in (
+                "invalid JSON",
+                "[]",
+                '{"post_type":"message"}',
+                json.dumps({**incoming(), "self_id": 101, "message": "do-not-log-this-message"}),
+                json.dumps(incoming()),
+            ):
                 await socket.send(frame)
             async for frame in socket:
                 action = json.loads(frame)
@@ -110,6 +116,9 @@ def test_forward_management_events_echo_and_backpressure(workspace):
                     socket = await asyncio.wait_for(connections.get(), 3)
                     assert socket.request.headers["Authorization"] == "Bearer test-ws-secret"
                     await asyncio.wait_for(replied.wait(), 3)
+                    assert "OneBot self_id does not match connection" in caplog.text
+                    assert "do-not-log-this-message" not in caplog.text
+                    assert "test-ws-secret" not in caplog.text
                     assert (await client.get("/api/adapters/onebot")).json()[0]["status"] == "connected"
                     live = (await client.get("/api/status")).json()["connections"][0]
                     assert live["status"] == "connected" and live["websocket"]

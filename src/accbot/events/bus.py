@@ -160,10 +160,23 @@ class EventBus:
                             and (sub.where is None or sub.where(envelope.event))
                         ):
                             matches.append(sub)
+                            log.debug(
+                                "Event matched: event=%s subscription=%s plugin=%s handler=%s",
+                                envelope.event.event_id,
+                                sub.id,
+                                sub.owner.plugin_id if sub.owner else "framework",
+                                getattr(sub.handler, "__qualname__", type(sub.handler).__name__),
+                            )
                     except Exception as exc:
                         envelope.errors.append(error_info(exc, envelope.event.event_id))
                         log.exception("event filter failed")
                 envelope.remaining = len(matches)
+                log.debug(
+                    "Event dispatched: event=%s type=%s matches=%s",
+                    envelope.event.event_id,
+                    envelope.event.event_type,
+                    len(matches),
+                )
                 if not matches:
                     self._complete(envelope)
                 for sub in matches:

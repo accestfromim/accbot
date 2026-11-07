@@ -8,6 +8,7 @@ from pathlib import Path
 import httpx
 import pytest
 from PIL import Image
+from websockets.asyncio.server import serve
 
 from accbot import (
     AssetRef,
@@ -26,7 +27,7 @@ from accbot import (
     User,
     UserRef,
 )
-from accbot.config import ModelCard
+from accbot.config import ModelCard, OneBotConfig
 from accbot.models import render_items
 from accbot.runtime import Runtime
 from accbot.types import SendReceipt
@@ -202,6 +203,116 @@ def test_chat_identity_comes_from_each_inbound_connection(setup_ai):
                 assert "平台：qq" in identity[0]
                 # The sender's ID remains separate from the bot's connection identity.
                 assert any(i.role == "user" and "用户 ID：200" in i.content[0].text for i in items)
+        finally:
+            await runtime.close()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("message_format", ["array", "string"])
+def test_forward_ws_wakes_real_chat_plugin(setup_ai, message_format, caplog):
+    trace_loggers = ("accbot.adapters.onebot", "accbot.events.bus", "accbot.ai.chat.events")
+    for logger in trace_loggers:
+        caplog.set_level("DEBUG", logger=logger)
+
+    async def run():
+        runtime, plugin, model = await setup_ai()
+        connected = asyncio.Queue()
+        observed = asyncio.Event()
+        actions = []
+        runtime.events.subscribe(MessageReceived, lambda _: observed.set())
+
+        async def protocol(socket):
+            await connected.put(socket)
+            async for frame in socket:
+                action = json.loads(frame)
+                actions.append(action)
+                await socket.send(
+                    json.dumps(
+                        {"status": "ok", "retcode": 0, "echo": action["echo"], "data": {"message_id": 500}}
+                    )
+                )
+
+        async def receive(socket, number, *, mention=True, group=100):
+            text = "你好 & [群聊]"
+            message = [{"type": "text", "data": {"text": text}}]
+            if mention:
+                message.append({"type": "at", "data": {"qq": "999"}})
+            if message_format == "string":
+                message = "你好 &amp; &#91;群聊&#93;" + ("[CQ:at,qq=999]" if mention else "")
+            observed.clear()
+            await socket.send(
+                json.dumps(
+                    {
+                        "post_type": "message",
+                        "message_type": "group",
+                        "self_id": 999,
+                        "group_id": group,
+                        "user_id": 200,
+                        "message_id": number,
+                        "time": 1700000000,
+                        "sender": {"nickname": "群友", "card": "群名片"},
+                        "message": message,
+                    }
+                )
+            )
+            await asyncio.wait_for(observed.wait(), 3)
+            await asyncio.wait_for(runtime.events.drain(), 3)
+            await asyncio.wait_for(runtime.jobs.drain(), 3)
+            await asyncio.wait_for(runtime.events.drain(), 3)
+
+        try:
+            async with serve(protocol, "127.0.0.1", 0) as server:
+                # Replace the fixture's fake senders with the actual production adapter.
+                runtime.messages.adapters.clear()
+                await runtime.replace_connections(
+                    [
+                        OneBotConfig(
+                            id="main",
+                            self_id="999",
+                            mode="forward_ws",
+                            ws_url=f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}/",
+                        )
+                    ]
+                )
+                try:
+                    socket = await asyncio.wait_for(connected.get(), 3)
+                    # A different group is rejected by the decorator, before session observation.
+                    await receive(socket, 1, group=101)
+                    assert not plugin.sessions.channels and not model.requests
+                    # Unmentioned messages are observed, but do not wake at probability zero.
+                    await receive(socket, 2, mention=False)
+                    channel = next(iter(plugin.sessions.channels.values()))
+                    assert channel.session is None and not model.requests
+                    await receive(socket, 3)
+                    assert channel.session is not None
+                    assert len(model.requests) == len(actions) == 1
+                    items, tools, _ = model.requests[0]
+                    assert any(i.role == "user" and "你好 & [群聊]" in i.content[0].text for i in items)
+                    assert all(t.name != "execute_shell" for t in tools)
+                    assert actions[0]["action"] == "send_group_msg"
+                    assert str(actions[0]["params"]["group_id"]) == "100"
+                    assert channel.idle_timer is not None
+                    # Adapter deduplication must prevent a second model call on a repeated frame.
+                    receipt = await runtime.messages.adapters["main"].ingest(
+                        {
+                            "post_type": "message",
+                            "message_type": "group",
+                            "self_id": 999,
+                            "group_id": 100,
+                            "user_id": 200,
+                            "message_id": 3,
+                            "message": [],
+                        }
+                    )
+                    assert receipt is None and len(model.requests) == 1
+                    trace = "\n".join(r.getMessage() for r in caplog.records if r.name in trace_loggers)
+                    assert "handler=Plugin.receive_group_message" in trace
+                    assert "awake=True" in trace and "awake=False" in trace
+                    assert "reason=duplicate" in trace
+                    assert "你好" not in trace and "收到喵" not in trace and "群名片" not in trace
+                finally:
+                    await runtime.replace_connections([])
         finally:
             await runtime.close()
 

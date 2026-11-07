@@ -48,4 +48,38 @@ SnowLuma 文档给出的 WebSocket 地址是 `ws://snowluma:3001/`。两端运�
 
 配置持久化于 `.accbot/config/adapters/onebot/<id>.json`。JSON 只保存密钥引用，管理 API 不返回已保存的 Token。
 
+## 消息格式与会话唤醒
+
+`message` 字段支持消息段数组和 CQ 字符串，两者统一转成内部 MessageChain。字符串中的正文、`[CQ:at,qq=...]`、引用和媒体按 OneBot 11 解析；未知片段保留为 `onebot.<类型>` 自定义片段。先识别 CQ 片段再解码转义，因此用户输入的字面文本 `&#91;CQ:at,qq=...&#93;` 不会被当成真实提及。
+
+SnowLuma 的 `messageFormat` 可选 `array` 或 `string`，官方默认配置为 `array`；`wsServers.role` 应为 `Universal`，以便同一连接接收事件和调用 API。参见 [SnowLuma 配置](https://snowluma.github.io/en/docs/guide/configuration) 与 [OneBot 字符串消息](https://github.com/botuniverse/onebot-11/blob/master/message/string.md)。
+
+连接建立和聊天会话唤醒是两个独立步骤。默认 AI 插件需要：
+
+- `ai.tools` 和 `ai.chat` 均已激活，聊天插件配置了默认模型。
+- 群规则已启用，`connection_id` 等于 accbot 的 OneBot 配置 ID，`group_id` 等于实际QQ群号。接入 ID 不是机器人 QQ 号，也不是 SnowLuma 的服务名称。
+- 入站 `self_id` 等于接入配置的机器人 QQ 号；账号不匹配的事件会被拒绝。
+- 群消息满足唤醒策略：有效的 `@机器人` 且发送者通过提及白名单，或概率接话命中。默认首次随机接话概率为 1%，普通消息不保证激活会话。
+- 机器人自己的 `message_sent` 或发送者为机器人的回显不作为他人消息交给聊天订阅，以免自我循环。主人私聊需要由配置的主人账号发出。
+
+## 事件跟踪
+
+需要检查消息停在哪一层时，可启动：
+
+```sh
+accbot serve --trace-events
+```
+
+跟踪日志使用 `event` ID 关联入站解析、订阅匹配和唤醒判断，不输出消息正文、昵称或密钥，也不启用 HTTP/WebSocket 的底层调试日志。
+
+| 记录 | 含义 |
+| --- | --- |
+| `OneBot event decoded` / `OneBot message` | 已解码；包含事件类型、连接、会话、消息与发送者 ID、消息格式及是否自身消息 |
+| `OneBot event rejected` | 事件校验失败，例如 `self_id` 不匹配；继续接收后续帧 |
+| `reason=duplicate` / `reason=self_echo` | 去重或自身回显处理 |
+| `Event matched` / `Event dispatched` | 匹配到的插件、处理方法与订阅数量；`matches=0` 表示没有匹配的活跃订阅 |
+| `AI wake decision` | 消息已到达聊天插件；显示提及、主人、已有会话、概率及 `awake` 判断 |
+
+收到心跳或生命周期事件，只能证明连接收包正常；它们不是消息事件，不会进入 `@on_message`。
+
 协议依据：[OneBot 11 正向 WebSocket](https://github.com/botuniverse/onebot-11/blob/master/communication/ws.md)。

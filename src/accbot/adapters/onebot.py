@@ -1,6 +1,7 @@
 """OneBot 11 events and actions over HTTP and forward/reverse WebSocket."""
 
 import asyncio
+import logging
 from collections import OrderedDict
 from datetime import datetime, timezone
 
@@ -35,7 +36,10 @@ from ..types import (
     User,
     UserRef,
 )
+from .onebot_message import parse_cq
 from .onebot_ws import run_forward
+
+log = logging.getLogger(__name__)
 
 
 class OneBotAdapter:
@@ -111,8 +115,7 @@ class OneBotAdapter:
             segments, reply = [], None
             source = raw.get("message", [])
             if isinstance(source, str):
-                # Preserve CQ strings instead of pretending they are plain text.
-                source = [{"type": "custom", "data": {"raw_cq": source}}]
+                source = parse_cq(source)
             for item in source:
                 t, data = item["type"], item.get("data", {})
                 if t == "text":
@@ -228,12 +231,29 @@ class OneBotAdapter:
                 future.set_result(raw)
             return None
         event = self.decode(raw)
+        log.debug(
+            "OneBot event decoded: connection=%s event=%s type=%s",
+            self.config.id,
+            event.event_id,
+            event.event_type,
+        )
         if isinstance(event, MessageReceived):
+            log.debug(
+                "OneBot message: event=%s conversation=%s message=%s sender=%s format=%s self=%s",
+                event.event_id,
+                event.message.conversation.key,
+                event.message.ref.id,
+                event.message.sender.ref.id,
+                "string" if isinstance(raw.get("message"), str) else "array",
+                event.message.is_self,
+            )
             key = (event.message.conversation.key, event.message.ref.id)
             if key in self._seen:
+                log.debug("OneBot event ignored: event=%s reason=duplicate", event.event_id)
                 return None
             self._remember(self._seen, key)
             if event.message.is_self:
+                log.debug("OneBot message excluded from chat: event=%s reason=self_echo", event.event_id)
                 # Outbound receipts are the authoritative sent event. An uncorrelated
                 # own-client message remains visible as a platform-specific event.
                 if event.message.ref.id in self._sent:

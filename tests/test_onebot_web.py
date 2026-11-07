@@ -69,6 +69,43 @@ def test_mapping_scope_notice_file_and_custom():
     assert invalid.value.info.code == "invalid_argument"
 
 
+def test_cq_and_array_messages_have_identical_internal_content():
+    adapter = OneBotAdapter(OneBotConfig(id="main", self_id="100"), EventBus(), None, lambda _: "")
+    cq = "hi[CQ:reply,id=399][CQ:at,qq=100][CQ:image,file=image-id,url=https://media.test/image]"
+    # Asset handles are newly allocated for each decode; their platform references must match.
+    exclude = {"content": {"segments": {"__all__": {"asset": {"id"}}}}}
+    actual = adapter.decode(incoming(message=cq)).message.model_dump(exclude=exclude)
+    assert actual == adapter.decode(incoming()).message.model_dump(exclude=exclude)
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("你好，群友", "你好，群友"),
+        ("&#91;CQ:at,qq=100&#93;", "[CQ:at,qq=100]"),
+        ("&amp;#91; &amp;#93; &amp;amp; &#44;", "&#91; &#93; &amp; &#44;"),
+        ("[CQ:at,qq]", "[CQ:at,qq]"),
+        ("[CQ:at,qq=100", "[CQ:at,qq=100"),
+    ],
+)
+def test_cq_text_escapes_and_malformed_codes_remain_text(source, expected):
+    adapter = OneBotAdapter(OneBotConfig(id="main", self_id="100"), EventBus(), None, lambda _: "")
+    content = adapter.decode(incoming(message=source)).message.content
+    assert content == MessageBuilder().text(expected).build()
+
+
+def test_cq_unknown_segments_parameters_and_empty_message():
+    adapter = OneBotAdapter(OneBotConfig(id="main", self_id="100"), EventBus(), None, lambda _: "")
+    content = adapter.decode(
+        incoming(message="[CQ:shake][CQ:share,title=a=b&#44;\n&#91;x&#93;&amp;#44;,url=https://test/?a=b]")
+    ).message.content
+    shake, share = content
+    assert shake.type == "custom" and shake.name == "onebot.shake" and shake.data == {}
+    assert share.name == "onebot.share"
+    assert share.data == {"title": "a=b,\n[x]&#44;", "url": "https://test/?a=b"}
+    assert adapter.decode(incoming(message="")).message.content.segments == ()
+
+
 def test_http_send_roundtrip_dedup_and_self_echo(workspace):
     requests = []
 

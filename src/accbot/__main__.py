@@ -12,8 +12,15 @@ def main():
     parser.add_argument("--data-dir", default=".accbot")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8000, type=int)
+    parser.add_argument(
+        "--trace-events", action="store_true", help="trace event routing without message bodies"
+    )
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO)
+    if args.trace_events:
+        # Do not enable transport DEBUG logs, which can include authorization headers.
+        for name in ("accbot.adapters.onebot", "accbot.events.bus", "accbot.ai.chat.events"):
+            logging.getLogger(name).setLevel(logging.DEBUG)
     store = ConfigStore(Path(args.data_dir))
     if args.command == "init":
         settings = store.load()

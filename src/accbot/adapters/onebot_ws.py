@@ -8,6 +8,8 @@ from starlette.websockets import WebSocketDisconnect
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed
 
+from ..errors import FrameworkError
+
 log = logging.getLogger(__name__)
 RECONNECT_DELAY = 1.0
 MAX_RECONNECT_DELAY = 30.0
@@ -38,6 +40,13 @@ async def serve_websocket(adapter, socket):
             raw = await incoming.get()
             try:
                 await adapter.ingest(raw)
+            except FrameworkError as exc:
+                log.warning(
+                    "OneBot event rejected: %s (%s): %s",
+                    adapter.config.id,
+                    exc.info.code,
+                    exc.info.message,
+                )
             except Exception as exc:
                 log.warning("Invalid OneBot event: %s (%s)", adapter.config.id, type(exc).__name__)
             finally:
