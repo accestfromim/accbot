@@ -1,0 +1,7 @@
+id = "demo.missing"
+name = "缺失依赖示例"
+version = "1.0.0"
+description = "故意声明一个不存在的依赖，用于预览缺失提示和激活前拦截。其他演示插件不受影响。"
+tags = ["demo"]
+[requires]
+"demo.not_installed" = ">=1.0"

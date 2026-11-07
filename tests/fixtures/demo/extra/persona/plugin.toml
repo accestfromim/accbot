@@ -1,0 +1,6 @@
+id = "demo.persona"
+name = "人格资源示例"
+version = "1.0.0"
+kind = "resource"
+description = "包含一张演示人格卡片。框架只提供资源读取能力，如何应用人格由消费插件决定。"
+tags = ["demo", "resource"]

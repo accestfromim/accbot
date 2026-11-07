@@ -1,0 +1,6 @@
+id = "ai.chat"
+name = "AI · 群聊与会话"
+version = "1.0.0"
+description = "群聊参与策略、完整工具循环、长期记忆与可选的主人私聊通道。"
+tags = ["ai", "chat", "memory"]
+requires = { "ai.tools" = ">=1,<2" }

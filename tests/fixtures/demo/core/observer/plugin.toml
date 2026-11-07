@@ -1,0 +1,7 @@
+id = "demo.observer"
+name = "群消息观察器"
+version = "1.0.0"
+description = "在内存中统计收到的消息数量，演示事件订阅与插件协作。仅观察，不自动回复。"
+tags = ["demo", "observer"]
+[requires]
+"demo.service" = ">=1.0,<2"

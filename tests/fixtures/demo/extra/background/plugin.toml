@@ -1,0 +1,7 @@
+id = "demo.background"
+name = "后台任务示例"
+version = "1.0.0"
+description = "提供一个短暂等待后返回结果的后台工具，供开发者验证异步回执及停用后的自然完成。"
+tags = ["demo", "timer"]
+[requires]
+"demo.service" = ">=1.0,<2"

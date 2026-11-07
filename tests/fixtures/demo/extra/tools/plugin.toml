@@ -1,0 +1,7 @@
+id = "demo.tools"
+name = "工具示例"
+version = "1.0.0"
+description = "注册一个只返回输入文本的本地工具。演示工具随插件激活注册、随卸载撤销。"
+tags = ["demo", "tool"]
+[requires]
+"demo.service" = ">=1.0,<2"

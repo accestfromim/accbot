@@ -1,0 +1,103 @@
+<div class="chat-settings">
+  <form>
+    <section class="section">
+      <div class="section-title">模型与会话</div>
+      <p class="help">选择模型卡，添加允许参与的群。保存后会应用到新的会话。</p>
+      <label class="field"
+        ><span>默认模型</span
+        ><select class="input" name="default_model" required>
+          <option value="">请选择模型卡</option>
+        </select></label
+      >
+      <div class="model-info" data-model-info></div>
+      <label class="field"
+        ><span>人格卡</span
+        ><select class="input" name="persona_id">
+          <option value="">不使用人格卡</option>
+        </select></label
+      >
+      <p class="help">
+        在侧栏「人格卡」中统一新建和编辑，通过系统提示词中的 &lt;persona&gt;
+        引用。
+      </p>
+      <label class="field"
+        ><span>聊天系统提示词</span
+        ><select class="input" name="chat_prompt_id" required></select
+      ></label>
+      <label class="field"
+        ><span>主人私聊系统提示词</span
+        ><select class="input" name="owner_prompt_id" required></select
+      ></label>
+      <label class="field"
+        ><span>记忆整理系统提示词</span
+        ><select class="input" name="memory_prompt_id" required></select
+      ></label>
+      <p class="help">
+        在侧栏「系统提示词」中维护正文。这里选择各类调用使用哪张卡。
+      </p>
+    </section>
+    <section class="section">
+      <div class="section-heading">
+        <div class="section-title">参与的群聊</div>
+        <button class="button" type="button" data-add="groups">添加群聊</button>
+      </div>
+      <p class="help">
+        连接 ID 是「适配器 → OneBot」中保存的配置 ID，仅用于接收与发送。QQ
+        群记忆按平台和群号保存，更换连接或重载插件后继续使用。
+      </p>
+      <div data-list="groups"></div>
+      <p class="empty" data-empty="groups">尚未添加群聊</p>
+    </section>
+    <section class="section">
+      <div class="section-heading">
+        <div class="section-title">普通私聊</div>
+        <button class="button" type="button" data-add="private_users">
+          添加用户
+        </button>
+      </div>
+      <p class="help">
+        白名单用户通过 @ 机器人触发，每轮独立，不保存长期记忆。
+      </p>
+      <div data-list="private_users"></div>
+      <p class="empty" data-empty="private_users">尚未添加私聊用户</p>
+    </section>
+    <section class="section">
+      <div class="section-title">主人私聊</div>
+      <p class="help">
+        每条主人消息都会触发对话，保留独立的会话和长期记忆。留空则关闭。
+      </p>
+      <div class="grid">
+        <label class="field"
+          ><span>连接 ID</span
+          ><input
+            class="input"
+            name="owner_connection"
+            placeholder="例如 qq-main" /></label
+        ><label class="field"
+          ><span>主人用户 ID</span
+          ><input class="input" name="owner_user" placeholder="QQ 号"
+        /></label>
+      </div>
+      <label class="check"
+        ><input type="checkbox" name="owner_controls" /><span
+          >允许主人私聊使用文件读写和 Shell 工具</span
+        ></label
+      >
+      <p class="help">
+        这些工具以机器人进程的系统权限运行，仅开放给上面配置的主人私聊。
+      </p>
+    </section>
+    <details class="section">
+      <summary>参与策略与上下文</summary>
+      <p class="help">
+        最近 15 条消息之后再来一条，且仍在高频时间窗内，使用高频概率；@ 触发绕过冷却。
+      </p>
+      <div class="grid" data-numbers></div>
+    </details>
+    <div class="form-error" role="alert"></div>
+    <div class="actions">
+      <span class="help" data-save-hint>加载配置中…</span
+      ><button class="button primary" type="submit" disabled>保存配置</button>
+    </div>
+  </form>
+</div>

@@ -1,0 +1,5 @@
+id = "ai.tools"
+name = "AI · 网络与消息工具"
+version = "1.0.0"
+description = "搜索、网页读取、受控下载、图片查看与消息发送。工具由聊天插件按会话选择。"
+tags = ["ai", "tools"]

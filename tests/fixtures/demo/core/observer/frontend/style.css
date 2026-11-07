@@ -1,0 +1,62 @@
+.intro {
+  margin: 6px 0 30px;
+}
+.section-eyebrow {
+  display: inline-block;
+  color: var(--accent);
+  font-size: 11px;
+  margin-bottom: 12px;
+}
+.intro p {
+  font-size: 12px;
+}
+.model-preview {
+  display: grid;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--input);
+  padding: 17px;
+  margin: 15px 0 26px;
+}
+.preview-label {
+  color: var(--faint);
+  font-size: 10px;
+}
+.model-preview strong {
+  font-size: 13px;
+}
+.model-preview .mono {
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  border-top: 1px solid var(--border);
+  padding: 23px 0;
+}
+.toggle-row > span {
+  flex: 1;
+}
+.toggle-row strong {
+  display: block;
+  font-size: 12px;
+}
+.toggle-row small {
+  display: block;
+  font-size: 11px;
+  margin-top: 5px;
+}
+.save-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  border-top: 1px solid var(--border);
+  padding-top: 23px;
+}
+.save-row > span {
+  font-size: 11px;
+}

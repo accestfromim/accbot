@@ -1,0 +1,33 @@
+<div class="observer-settings">
+  <section class="intro">
+    <span class="section-eyebrow">偏好设置</span>
+    <h2>按你的方式配置插件</h2>
+    <p class="muted">选择默认模型，并设置消息观察行为。</p>
+  </section>
+  <form>
+    <label class="field">
+      <span class="field-label">默认模型</span>
+      <select class="input" name="default_model" disabled>
+        <option value="">正在读取模型卡…</option>
+      </select>
+      <p class="field-help" data-model-help>从工作台已保存的模型卡中选择。</p>
+    </label>
+    <div class="model-preview" hidden>
+      <span class="preview-label">当前选择</span>
+      <strong data-model-name></strong>
+      <span class="mono muted" data-model-id></span>
+    </div>
+    <label class="toggle-row">
+      <span
+        ><strong>统计群聊消息</strong
+        ><small class="muted">启用后，在内存中累计收到的消息数量。</small></span
+      >
+      <input class="check-input" type="checkbox" name="count_messages" />
+    </label>
+    <div class="form-error" role="alert"></div>
+    <div class="save-row">
+      <span class="muted" data-save-hint>读取配置中…</span>
+      <button class="button primary" type="submit" disabled>保存配置</button>
+    </div>
+  </form>
+</div>

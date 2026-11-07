@@ -1,0 +1,5 @@
+id = "demo.service"
+name = "基础服务"
+version = "1.0.0"
+description = "导出一个简单的公开接口，为其他演示插件提供依赖。试试卸载它，观察依赖者如何一起停用。"
+tags = ["demo", "service"]

@@ -1,0 +1,96 @@
+.chat-settings {
+  display: block;
+  color: var(--text);
+}
+.section {
+  padding: 0 0 22px;
+  margin-bottom: 22px;
+  border-bottom: 1px solid var(--border);
+}
+.section-title,
+summary {
+  font-size: 14px;
+  font-weight: 650;
+}
+summary {
+  cursor: pointer;
+}
+.section-heading,
+.actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.help,
+.empty,
+.model-info {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+.help {
+  margin: 10px 0;
+}
+.model-info {
+  margin-top: 8px;
+  overflow-wrap: anywhere;
+}
+.empty {
+  padding: 18px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  text-align: center;
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+.field {
+  min-width: 0;
+}
+.input {
+  width: 100%;
+  box-sizing: border-box;
+}
+.entry {
+  padding: 14px;
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.entry-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  margin-top: 12px;
+}
+.check input {
+  accent-color: var(--accent);
+}
+.form-error {
+  font-size: 12px;
+  color: var(--red);
+  white-space: pre-wrap;
+  margin-bottom: 12px;
+}
+.actions {
+  position: sticky;
+  bottom: -20px;
+  padding: 16px 0;
+  background: var(--surface);
+}
+@media (max-width: 480px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}
