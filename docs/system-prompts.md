@@ -93,4 +93,10 @@ class Example(Plugin):
 
 插件配置页用 `api.listPrompts()` 列出卡片，`SettingsContext.prompts` 可在插件未激活时校验 ID。卡片选择属于插件配置，不写入模型卡。管理 API 见 [公共接口](api.md#管理接口)。
 
-首次初始化提供 chat、owner、memory 三张卡，官方聊天插件分别通过 `chat_prompt_id`、`owner_prompt_id`、`memory_prompt_id` 选择。chat 和 owner 含三个占位符；memory 默认只含整理任务及 JSON 结构，不混入人格和工具使用说明。用户可编辑、替换或删除这些卡片，删除后重启不会重新创建。
+首次初始化提供 chat、owner、memory 三张卡，官方聊天插件分别通过 `chat_prompt_id`、`owner_prompt_id`、`memory_prompt_id` 选择：
+
+- [chat](../src/accbot/prompts/defaults/chat.md) 说明多人群聊中的参与时机、身份与指代、工具调用和回复规则。
+- [owner](../src/accbot/prompts/defaults/owner.md) 说明已校验的主人私聊中的任务理解、工具执行和结果核验。
+- [memory](../src/accbot/prompts/defaults/memory.md) 说明先按需更新用户画像、再整理会话记忆的顺序，以及记忆字段含义与信息取舍。
+
+chat 和 owner 含三个占位符；memory 通过 `<tools_insert_prompt>` 注入本次画像工具的具体说明，不混入人格或通用插件补充。模板描述场景和行为规则，具体工具参数与限制由工具 Schema 和补充说明提供。用户可编辑、替换或删除这些卡片，删除后重启不会重新创建。
