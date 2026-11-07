@@ -11,6 +11,7 @@ src/accbot/
 ├─ prompts/             # 系统提示词卡、模板组装及初始 Markdown 卡片
 ├─ plugins/             # 清单、插件接口、源码快照、生命周期管理
 ├─ adapters/onebot.py   # 官方 OneBot 11 适配器
+├─ adapters/onebot_ws.py # 正向连接与两种 WebSocket 共用的事件/回执接收
 ├─ web/
 │  ├─ app.py            # 应用装配和静态资源
 │  ├─ auth.py           # 可选远程管理会话

@@ -53,12 +53,15 @@ accbot serve
 
 ### OneBot 接入
 
-支持 HTTP 上报和反向 WebSocket。例如配置 ID 为 `qq-main` 时：
+支持正向 WebSocket、反向 WebSocket 和 HTTP 上报。例如配置 ID 为 `qq-main` 时：
 
+- 正向 WebSocket：在 accbot 中填写协议端地址，例如 SnowLuma 的 `ws://127.0.0.1:3001/`，激活后由 accbot 主动连接。
 - HTTP 上报：`http://127.0.0.1:8000/onebot/qq-main/events`，配置协议端的 HTTP API 地址用于发送。
 - 反向 WebSocket：`ws://127.0.0.1:8000/onebot/qq-main/ws`，同一连接承载事件、API 调用和回执。
 
 启用 Access Token 时通过 `Authorization: Bearer ...` 传递。协议端位于其他主机或容器时，应使用双方可达的地址。监听地址可通过 `accbot serve --host ... --port ...` 修改。
+
+正向连接支持 `ws://` 和 `wss://`，断线后自动重连，停用即停止重连。使用同时提供事件与 API 的 WebSocket 地址；在 Docker 网络中连接 SnowLuma 时可填写 `ws://snowluma:3001/`。详见 [OneBot 接入](docs/onebot.md)。
 
 文件发送使用协议端的文件上传扩展；协议端需要支持相应 action，并能访问要上传的文件路径。内联图片可跨主机发送。
 
@@ -95,6 +98,7 @@ accbot/
 | [架构与设计](docs/design.md) | 职责边界、消息与事件、模型接口、依赖和热重载契约 |
 | [公共接口](docs/api.md) | 完整插件示例、过滤器、消息链、模型与管理 API |
 | [AI 插件](docs/ai-plugins.md) | 聊天策略、工具、记忆与私聊配置 |
+| [OneBot 接入](docs/onebot.md) | 三种连接方式、SnowLuma 示例、认证与重连 |
 | [系统提示词](docs/system-prompts.md) | 卡片、模板、插件补充和工具补充 |
 | [模型上下文](docs/model-context.md) | ModelItem、消息合并、多模态和原始输入 |
 | [插件配置页面](docs/plugin-frontend.md) | 配置组件、前端 SDK 和生命周期 |

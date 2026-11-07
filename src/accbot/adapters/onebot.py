@@ -1,10 +1,12 @@
-"""OneBot 11 HTTP actions and reverse WebSocket events/actions."""
+"""OneBot 11 events and actions over HTTP and forward/reverse WebSocket."""
 
 import asyncio
 from collections import OrderedDict
 from datetime import datetime, timezone
 
 import httpx
+from starlette.websockets import WebSocketDisconnect
+from websockets.exceptions import ConnectionClosed
 
 from ..config import OneBotConfig
 from ..errors import ErrorCode, FrameworkError, Outcome
@@ -33,6 +35,7 @@ from ..types import (
     User,
     UserRef,
 )
+from .onebot_ws import run_forward
 
 
 class OneBotAdapter:
@@ -46,9 +49,23 @@ class OneBotAdapter:
             bot=UserRef(platform="qq", scope=scope, id=config.self_id),
         )
         self.socket = None
+        self.retrying = False
+        self._runner: asyncio.Task | None = None
         self._pending: dict[str, asyncio.Future] = {}
         self._seen: OrderedDict[tuple, None] = OrderedDict()
         self._sent: OrderedDict[str, None] = OrderedDict()
+
+    @property
+    def status(self):
+        if self.socket is not None:
+            return "connected"
+        if self.config.mode == "forward_ws":
+            return "reconnecting" if self.retrying else "connecting"
+        return "waiting" if self.config.mode == "reverse_ws" else "active"
+
+    def start(self):
+        if self.config.enabled and self.config.mode == "forward_ws" and self._runner is None:
+            self._runner = asyncio.create_task(run_forward(self), name=f"onebot:{self.config.id}")
 
     def user(self, value, name=None):
         return User(ref=UserRef(platform="qq", scope=self.connection.scope, id=str(value)), name=name)
@@ -248,7 +265,11 @@ class OneBotAdapter:
                     result = await asyncio.wait_for(asyncio.shield(future), self.config.timeout)
                 finally:
                     self._pending.pop(request_id, None)
-            elif self.config.http_url:
+                    if not future.done():
+                        future.cancel()
+                    elif not future.cancelled():
+                        future.exception()
+            elif self.config.http_url and self.config.mode != "forward_ws":
                 headers = {}
                 if self.config.token_env:
                     headers["Authorization"] = "Bearer " + self.secret_resolver(self.config.token_env)
@@ -276,7 +297,7 @@ class OneBotAdapter:
             raise FrameworkError(
                 ErrorCode.TIMEOUT, "OneBot action timed out", operation_id=request_id, outcome=Outcome.UNKNOWN
             ) from exc
-        except (httpx.HTTPError, ValueError) as exc:
+        except (httpx.HTTPError, ValueError, OSError, ConnectionClosed, WebSocketDisconnect) as exc:
             raise FrameworkError(
                 ErrorCode.PROVIDER,
                 "invalid OneBot action response",
@@ -400,6 +421,10 @@ class OneBotAdapter:
         return asset.model_copy(update={"url": result["url"]})
 
     async def close(self):
+        if self._runner is not None:
+            self._runner.cancel()
+            await asyncio.gather(self._runner, return_exceptions=True)
+            self._runner = None
         if self.socket:
             socket = self.socket
             self.detach(socket)

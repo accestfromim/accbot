@@ -241,3 +241,5 @@ ModelItem 模式下，调用插件通过 `system_prompt_id` 选择系统提示�
 | `GET/POST/DELETE /api/session` | 查询会话、可选令牌登录、退出 |
 
 编辑或激活一个 OneBot 配置不会中断未修改配置的 WebSocket 连接。HTTP 模式的“已激活”仅表示框架接收该实例的事件并可调用其 API，不代表已完成 QQ 登录或网络连通性验证。
+
+OneBot 配置的 `mode` 支持 `reverse_ws`、`forward_ws`、`http`。正向模式要求 `ws_url` 为不含凭据和查询参数的 `ws://` 或 `wss://` 地址；向导通过独立 `token` 字段保存密钥。保存默认未激活，激活后异步建立连接；配置列表和 `/api/status` 的连接条目提供 `connecting`、`reconnecting`、`connected` 状态。连接及重试行为见 [OneBot 接入](onebot.md)。

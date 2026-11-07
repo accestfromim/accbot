@@ -41,9 +41,10 @@ class OneBotConfig(FrozenModel):
     name: str = ""
     self_id: str
     enabled: bool = True
-    mode: Literal["reverse_ws", "http"] = "reverse_ws"
+    mode: Literal["reverse_ws", "forward_ws", "http"] = "reverse_ws"
     scope: str | None = None
     http_url: str | None = None
+    ws_url: str | None = None
     token_env: str | None = None
     timeout: float = Field(default=30, gt=0)
 
@@ -51,6 +52,25 @@ class OneBotConfig(FrozenModel):
     @classmethod
     def valid_http_url(cls, value):
         return ModelCard.valid_endpoint(value) if value else None
+
+    @field_validator("ws_url")
+    @classmethod
+    def valid_ws_url(cls, value):
+        if not value:
+            return None
+        parsed = urlsplit(value)
+        if (
+            parsed.scheme not in {"ws", "wss"}
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+            or any(c.isspace() for c in value)
+        ):
+            raise ValueError("WebSocket 地址必须使用 ws:// 或 wss://，且不含凭据、查询参数或片段")
+        _ = parsed.port  # Validate the port before starting a connection task.
+        return value
 
     @model_validator(mode="before")
     @classmethod
@@ -60,9 +80,11 @@ class OneBotConfig(FrozenModel):
         return value
 
     @model_validator(mode="after")
-    def validate_http_mode(self):
+    def validate_transport(self):
         if self.mode == "http" and not self.http_url:
             raise ValueError("HTTP 模式需要填写协议端 API 地址")
+        if self.mode == "forward_ws" and not self.ws_url:
+            raise ValueError("正向 WebSocket 模式需要填写协议端 WebSocket 地址")
         return self
 
 

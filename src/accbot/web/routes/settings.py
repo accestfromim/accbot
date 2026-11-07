@@ -18,7 +18,12 @@ def create_router(runtime):
             "plugin_directory": str(runtime.plugins.directory),
             "config_directory": str(runtime.store.config_dir),
             "connections": [
-                {"id": a.connection.id, "websocket": a.socket is not None, "mode": a.config.mode}
+                {
+                    "id": a.connection.id,
+                    "websocket": a.socket is not None,
+                    "mode": a.config.mode,
+                    "status": a.status,
+                }
                 for a in runtime.messages.adapters.values()
             ],
         }

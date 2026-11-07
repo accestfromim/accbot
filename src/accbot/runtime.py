@@ -68,6 +68,9 @@ class Runtime:
         await self.events.start()
         await self.plugins.activate(self.settings.active_plugins)
         self.started = True
+        for config in self.settings.onebot:
+            if config.enabled:
+                self.messages.adapters[config.id].start()
 
     def _save_actual(self):
         self.settings = self.settings.model_copy(
@@ -160,6 +163,10 @@ class Runtime:
             if updated.get(key) is not adapter:
                 await adapter.close()
         self.settings = self.settings.model_copy(update={"onebot": tuple(configs)})
+        if self.started:
+            for key, adapter in updated.items():
+                if previous.get(key) is not adapter:
+                    adapter.start()
 
     async def close(self):
         await self.plugins.close()

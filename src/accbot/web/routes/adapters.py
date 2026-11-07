@@ -27,18 +27,10 @@ def create_router(runtime):
         result = []
         for config in runtime.settings.onebot:
             adapter = runtime.messages.adapters.get(config.id)
-            connected = adapter is not None and adapter.socket is not None
-            state = (
-                "connected"
-                if connected
-                else "waiting"
-                if config.enabled and config.mode == "reverse_ws"
-                else ("active" if config.enabled else "inactive")
-            )
             result.append(
                 {
                     **config.model_dump(mode="json"),
-                    "status": state,
+                    "status": adapter.status if adapter else "inactive",
                     "token_configured": bool(
                         config.token_env
                         and any(
@@ -74,6 +66,7 @@ def create_router(runtime):
                 self_id=body.self_id,
                 mode=body.mode,
                 http_url=body.http_url or None,
+                ws_url=body.ws_url or None,
                 scope=body.scope or None,
                 token_env=variable,
                 enabled=previous.enabled if previous else False,

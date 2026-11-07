@@ -45,6 +45,7 @@ accbot 是面向群体聊天的 Python AI 机器人框架。多个参与者、�
 
 - 发送是返回回执的异步服务调用；MessageSent 是平台接受操作后的事实通知，不代表对方已读。
 - 请求发送、发送回执和自身消息回显分别处理，回显与发送记录关联以避免重复入站。失败区分确定失败与结果未知，不自动重试有副作用的发送。
+- OneBot 支持 HTTP、反向 WebSocket 和正向 WebSocket。正向连接由激活配置驱动，断线自动重连，停用及配置替换取消连接任务；已发出且未确认的 API 调用不随重连重发。两种 WebSocket 共用事件与回执接收逻辑，回执不受事件队列背压阻塞。
 - 模型卡由框架配置产生，包含内部 ID、说明、端点、模型名、协议、能力与默认参数；密钥通过框架管理的环境变量引用解析。对外模型目录不暴露密钥值。
 - 模型管理器按 ID 返回可复用的无会话客户端。上下文和工具均由调用插件传入。
 - generate 同时接受 ModelItem 序列和原生消息数组的 JSON 字符串。字符串模式绕过内部消息渲染及全部提示词注入，忽略 system_prompt_id/persona_id；继续使用模型卡的端点、凭据、工具 Schema 和返回解析。不把文本中的角色标签猜测为协议字段。
@@ -117,7 +118,7 @@ unload 是逻辑卸载；旧任务持有旧模块和对象直到完成。重新�
 | 配置、资源与业务文件 | [目录约定](directories.md)，`config/`、`personas/` |
 | 插件配置页面 | [前端接口](plugin-frontend.md)，`plugins/frontend.py`、`web/routes/plugin_ui.py` |
 | 默认聊天策略、记忆与工具 | [AI 插件](ai-plugins.md)，`plugins/ai/` |
-| OneBot 事件与 API | [OneBot 11 协议](https://github.com/botuniverse/onebot-11)，`adapters/onebot.py` |
+| OneBot 事件、API 与连接生命周期 | [OneBot 接入](onebot.md)、[OneBot 11 协议](https://github.com/botuniverse/onebot-11)，`adapters/onebot.py`、`adapters/onebot_ws.py` |
 
 除 `plugins/ai/` 外，表中源码路径相对 `src/accbot/`。
 
@@ -132,6 +133,7 @@ unload 是逻辑卸载；旧任务持有旧模块和对象直到完成。重新�
 - [x] 自定义事件、定时器、公开接口、工具和排队回调不能跨激活误投。
 - [x] 后台工具接受后可自然完成，结果与异常不会投递到新插件实例。
 - [x] OneBot 事件映射、发送回执、连接状态和未知结果有明确语义。
+- [x] 正向 WebSocket 支持认证、收发、重连及状态展示；停用和配置替换取消连接任务，回执可在事件积压时继续处理，断线不重发未确认操作。
 - [x] Chat/Responses 共用内部类型，保留工具关联、多模态与供应商续接项目。
 - [x] 相邻用户消息合并保留身份与引用，原生 JSON 输入绕过渲染及卡片注入。
 - [x] 卡片模板完全由用户控制，插件与工具补充按当前激活和工具集合注入。

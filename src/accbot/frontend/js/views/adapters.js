@@ -21,6 +21,17 @@ const wsURL = (id) =>
   `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/onebot/${encodeURIComponent(id)}/ws`;
 const httpURL = (id) =>
   `${location.origin}/onebot/${encodeURIComponent(id)}/events`;
+const modeNames = {
+  reverse_ws: "反向 WebSocket",
+  forward_ws: "正向 WebSocket",
+  http: "HTTP",
+};
+const connectionURL = (config) =>
+  config.mode === "forward_ws"
+    ? config.ws_url
+    : config.mode === "http"
+      ? httpURL(config.id)
+      : wsURL(config.id);
 export function renderAdapters(root) {
   root.innerHTML =
     heading(
@@ -29,7 +40,7 @@ export function renderAdapters(root) {
       "",
       "CONNECTIONS",
     ) +
-    `<div class="adapter-catalog"><a class="card adapter-type-card" href="#onebot"><div class="adapter-type-header"><div class="onebot-mark">${icon("cable")}</div><div><h2>OneBot</h2><p>QQ · OneBot 11</p></div>${badge("官方适配器", "accent")}</div><p>连接 NapCat 等 OneBot 协议端，接收群聊消息、成员事件，并通过统一接口发送消息。</p><div class="adapter-type-footer"><span>${state.connections.length} 个配置 · ${state.connections.filter((c) => c.enabled).length} 个已激活</span><span>管理配置 ${icon("arrow-right")}</span></div></a></div>`;
+    `<div class="adapter-catalog"><a class="card adapter-type-card" href="#onebot"><div class="adapter-type-header"><div class="onebot-mark">${icon("cable")}</div><div><h2>OneBot</h2><p>QQ · OneBot 11</p></div>${badge("官方适配器", "accent")}</div><p>连接 SnowLuma、NapCat 等 OneBot 协议端，接收群聊消息、成员事件，并通过统一接口发送消息。</p><div class="adapter-type-footer"><span>${state.connections.length} 个配置 · ${state.connections.filter((c) => c.enabled).length} 个已激活</span><span>管理配置 ${icon("arrow-right")}</span></div></a></div>`;
 }
 function status(config) {
   const live = state.status.connections.find((c) => c.id === config.id);
@@ -37,7 +48,13 @@ function status(config) {
   if (config.mode === "http") return badge("已激活", "good", true);
   return live?.websocket
     ? badge("已连接", "good", true)
-    : badge("等待连接", "warn", true);
+    : badge(
+        config.mode === "forward_ws"
+          ? live?.status === "reconnecting" ? "重连中" : "连接中"
+          : "等待连接",
+        "warn",
+        true,
+      );
 }
 export function renderOneBot(root) {
   root.innerHTML =
@@ -47,9 +64,9 @@ export function renderOneBot(root) {
       `<button class="button primary" id="add-onebot">${icon("plus")}新增配置</button>`,
       "ADAPTER / ONEBOT 11",
     ) +
-    `<div class="notice info adapter-intro">${icon("info")}<div class="notice-body"><strong>先保存配置，再激活接入。</strong> 激活反向 WebSocket 配置后，将连接地址填写到 NapCat 等协议端；HTTP 模式需要同时配置事件上报地址。</div></div>` +
+    `<div class="notice info adapter-intro">${icon("info")}<div class="notice-body"><strong>先保存配置，再激活接入。</strong> 正向 WebSocket 由 accbot 主动连接协议端；反向 WebSocket 由协议端连接 accbot；HTTP 模式需配置 API 和事件上报地址。</div></div>` +
     (state.connections.length
-      ? `<div class="section-toolbar"><span class="section-label">已保存的配置</span><span class="toolbar-total">${state.connections.length} 个配置</span></div><div class="card-grid">${state.connections.map((config) => `<article class="card connection-card"><div class="card-main"><div class="card-header"><div class="card-icon">${icon("cable")}</div><div class="card-heading"><h3>${esc(config.name || config.id)}</h3><div class="card-id">${esc(config.id)}</div></div><span data-connection-status="${esc(config.id)}">${status(config)}</span></div><div class="connection-identity"><span class="avatar">${icon("user")}</span><span>机器人 QQ</span><span class="mono">${esc(config.self_id)}</span></div><p class="connection-method">${config.mode === "http" ? "HTTP API + HTTP 事件上报" : "反向 WebSocket"} · ${config.token_configured ? "已设置连接密钥" : "未设置连接密钥"}</p><div class="connection-url">${icon("link")}<code title="${esc(config.mode === "http" ? httpURL(config.id) : wsURL(config.id))}">${esc(config.mode === "http" ? httpURL(config.id) : wsURL(config.id))}</code><button class="icon-button" data-copy="${esc(config.id)}" aria-label="复制连接地址">${icon("copy")}</button></div></div><div class="card-footer"><button class="button small ghost" data-edit="${esc(config.id)}">${icon("edit")}编辑</button><div class="actions"><button class="button small ${config.enabled ? "ghost" : "primary"}" data-switch="${esc(config.id)}">${icon(config.enabled ? "stop" : "play")}${config.enabled ? "停用" : "激活"}</button><button class="icon-button danger" data-delete="${esc(config.id)}" aria-label="删除 ${esc(config.id)}">${icon("trash")}</button></div></div></article>`).join("")}</div>`
+      ? `<div class="section-toolbar"><span class="section-label">已保存的配置</span><span class="toolbar-total">${state.connections.length} 个配置</span></div><div class="card-grid">${state.connections.map((config) => `<article class="card connection-card"><div class="card-main"><div class="card-header"><div class="card-icon">${icon("cable")}</div><div class="card-heading"><h3>${esc(config.name || config.id)}</h3><div class="card-id">${esc(config.id)}</div></div><span data-connection-status="${esc(config.id)}">${status(config)}</span></div><div class="connection-identity"><span class="avatar">${icon("user")}</span><span>机器人 QQ</span><span class="mono">${esc(config.self_id)}</span></div><p class="connection-method">${modeNames[config.mode]} · ${config.token_configured ? "已设置连接密钥" : "未设置连接密钥"}</p><div class="connection-url">${icon("link")}<code title="${esc(connectionURL(config))}">${esc(connectionURL(config))}</code><button class="icon-button" data-copy="${esc(config.id)}" aria-label="复制连接地址">${icon("copy")}</button></div></div><div class="card-footer"><button class="button small ghost" data-edit="${esc(config.id)}">${icon("edit")}编辑</button><div class="actions"><button class="button small ${config.enabled ? "ghost" : "primary"}" data-switch="${esc(config.id)}">${icon(config.enabled ? "stop" : "play")}${config.enabled ? "停用" : "激活"}</button><button class="icon-button danger" data-delete="${esc(config.id)}" aria-label="删除 ${esc(config.id)}">${icon("trash")}</button></div></div></article>`).join("")}</div>`
       : empty(
           "连接你的第一个 QQ 账号",
           "添加 OneBot 配置后，再到协议端完成连接。",
@@ -72,7 +89,7 @@ export function renderOneBot(root) {
     (button) =>
       (button.onclick = () => {
         const c = state.connections.find((c) => c.id === button.dataset.copy);
-        copy(c.mode === "http" ? httpURL(c.id) : wsURL(c.id));
+        copy(connectionURL(c));
       }),
   );
   root.querySelectorAll("[data-switch]").forEach(
@@ -127,6 +144,7 @@ function onebotWizard(existing) {
       self_id: existing?.self_id || "",
       mode: existing?.mode || "reverse_ws",
       http_url: existing?.http_url || "",
+      ws_url: existing?.ws_url || "",
       token: "",
       scope: existing?.scope || "",
     };
@@ -141,12 +159,23 @@ function onebotWizard(existing) {
       (step === 0
         ? `<form>${field("配置 ID", "id", draft.id, { required: true, readonly: !!existing, placeholder: "例如：qq-main", help: "用于区分不同的接入配置，也会出现在连接地址中。" })}${field("显示名称", "name", draft.name, { optional: true, placeholder: "例如：日常群聊机器人" })}${field("机器人 QQ 号", "self_id", draft.self_id, { required: true, placeholder: "填写登录协议端的 QQ 号" })}</form>`
         : step === 1
-          ? `<form><label class="radio-card"><input type="radio" name="mode" value="reverse_ws" ${draft.mode === "reverse_ws" ? "checked" : ""}><div><strong>反向 WebSocket ${badge("推荐", "accent")}</strong><p>由协议端主动连接 accbot，同一连接负责消息收发。</p></div></label><label class="radio-card"><input type="radio" name="mode" value="http" ${draft.mode === "http" ? "checked" : ""}><div><strong>HTTP</strong><p>accbot 调用协议端 HTTP API，协议端通过 HTTP 上报事件。</p></div></label><div id="http-field" ${draft.mode === "http" ? "" : "hidden"}>${field("协议端 HTTP API 地址", "http_url", draft.http_url, { type: "url", placeholder: "http://127.0.0.1:3000", help: "这是 NapCat 等协议端的地址，不是 accbot 的管理地址。" })}</div>${field("连接密钥 / Access Token", "token", draft.token, { type: "password", optional: true, placeholder: existing?.token_configured ? "已保存，留空保持原密钥" : "与协议端保持一致", help: "工作台自动管理密钥。协议端如设置了 Access Token，请填写相同的值。" })}</form>`
-          : `<h3 class="dialog-section-title">准备保存</h3><p class="dialog-section-description">${existing?.enabled ? "此配置已激活，修改连接信息会更新当前连接。" : "新配置保存后处于未激活状态，点击配置卡片上的「激活」即可启用。"}</p><div class="wizard-summary"><dl class="detail-list"><div><dt>配置</dt><dd>${esc(draft.name || draft.id)}</dd></div><div><dt>QQ 号</dt><dd class="mono">${esc(draft.self_id)}</dd></div><div><dt>连接方式</dt><dd>${draft.mode === "http" ? "HTTP" : "反向 WebSocket"}</dd></div><div><dt>连接密钥</dt><dd>${draft.token ? "保存新密钥" : existing?.token_configured ? "使用已保存的密钥" : "未设置"}</dd></div>${draft.mode === "http" ? `<div><dt>协议端 API</dt><dd class="mono">${esc(draft.http_url)}</dd></div>` : ""}</dl></div><p class="section-label" style="margin-top:23px">${draft.mode === "http" ? "事件上报地址" : "协议端应填写的反向 WebSocket 地址"}</p><div class="code-box"><code>${esc(draft.mode === "http" ? httpURL(draft.id) : wsURL(draft.id))}</code><button class="icon-button" id="copy-address" aria-label="复制地址">${icon("copy")}</button></div>`);
+          ? `<form><label class="radio-card"><input type="radio" name="mode" value="reverse_ws" ${draft.mode === "reverse_ws" ? "checked" : ""}><div><strong>反向 WebSocket</strong><p>由协议端主动连接 accbot，同一连接负责消息收发。</p></div></label><label class="radio-card"><input type="radio" name="mode" value="forward_ws" ${draft.mode === "forward_ws" ? "checked" : ""}><div><strong>正向 WebSocket</strong><p>accbot 主动连接 SnowLuma 等协议端，同一连接负责消息收发。</p></div></label><label class="radio-card"><input type="radio" name="mode" value="http" ${draft.mode === "http" ? "checked" : ""}><div><strong>HTTP</strong><p>accbot 调用协议端 HTTP API，协议端通过 HTTP 上报事件。</p></div></label><div id="http-field" ${draft.mode === "http" ? "" : "hidden"}>${field("协议端 HTTP API 地址", "http_url", draft.http_url, { type: "url", required: true, placeholder: "http://127.0.0.1:3000", help: "这是 NapCat 等协议端的地址，不是 accbot 的管理地址。" })}</div><div id="ws-field" ${draft.mode === "forward_ws" ? "" : "hidden"}>${field("协议端 WebSocket 地址", "ws_url", draft.ws_url, { type: "url", required: true, placeholder: "ws://127.0.0.1:3001/", help: "填写同时提供事件和 API 的地址，例如 SnowLuma 的 ws://127.0.0.1:3001/。跨容器时使用协议端服务名。" })}</div>${field("连接密钥 / Access Token", "token", draft.token, { type: "password", optional: true, placeholder: existing?.token_configured ? "已保存，留空保持原密钥" : "与协议端保持一致", help: "工作台自动管理密钥。协议端如设置了 Access Token，请填写相同的值。" })}</form>`
+          : `<h3 class="dialog-section-title">准备保存</h3><p class="dialog-section-description">${existing?.enabled ? "此配置已激活，修改连接信息会更新当前连接。" : "新配置保存后处于未激活状态，点击配置卡片上的「激活」即可启用。"}</p><div class="wizard-summary"><dl class="detail-list"><div><dt>配置</dt><dd>${esc(draft.name || draft.id)}</dd></div><div><dt>QQ 号</dt><dd class="mono">${esc(draft.self_id)}</dd></div><div><dt>连接方式</dt><dd>${modeNames[draft.mode]}</dd></div><div><dt>连接密钥</dt><dd>${draft.token ? "保存新密钥" : existing?.token_configured ? "使用已保存的密钥" : "未设置"}</dd></div>${draft.mode === "http" ? `<div><dt>协议端 API</dt><dd class="mono">${esc(draft.http_url)}</dd></div>` : ""}</dl></div><p class="section-label" style="margin-top:23px">${draft.mode === "forward_ws" ? "accbot 将连接的协议端 WebSocket 地址" : draft.mode === "http" ? "事件上报地址" : "协议端应填写的反向 WebSocket 地址"}</p><div class="code-box"><code>${esc(connectionURL(draft))}</code><button class="icon-button" id="copy-address" aria-label="复制地址">${icon("copy")}</button></div>`);
     view.footer.innerHTML = `<button class="button ghost" id="previous">${step ? "上一步" : "取消"}</button><button class="button primary" id="next">${step === 2 ? "保存配置" : "下一步"}${icon(step === 2 ? "check" : "arrow-right")}</button>`;
     bindPasswords(view.body);
-    const httpInput = view.body.querySelector('[name="http_url"]');
-    if (httpInput) httpInput.disabled = draft.mode !== "http";
+    function updateTransportFields(mode) {
+      for (const [kind, name] of [
+        ["http", "http_url"],
+        ["forward_ws", "ws_url"],
+      ]) {
+        const input = view.body.querySelector(`[name="${name}"]`);
+        if (!input) continue;
+        input.disabled = mode !== kind;
+        input.closest(kind === "http" ? "#http-field" : "#ws-field").hidden =
+          mode !== kind;
+      }
+    }
+    updateTransportFields(draft.mode);
     view.footer.querySelector("#previous").onclick = () => {
       capture();
       if (step) {
@@ -162,17 +191,12 @@ function onebotWizard(existing) {
     view.body.querySelectorAll('[name="mode"]').forEach(
       (input) =>
         (input.onchange = () => {
-          view.body.querySelector("#http-field").hidden =
-            input.value !== "http";
-          view.body.querySelector('[name="http_url"]').disabled =
-            input.value !== "http";
+          updateTransportFields(input.value);
         }),
     );
     view.body
       .querySelector("#copy-address")
-      ?.addEventListener("click", () =>
-        copy(draft.mode === "http" ? httpURL(draft.id) : wsURL(draft.id)),
-      );
+      ?.addEventListener("click", () => copy(connectionURL(draft)));
   }
   function capture() {
     if (step === 0) Object.assign(draft, formValues(view.body));
@@ -180,6 +204,7 @@ function onebotWizard(existing) {
       draft.mode = view.body.querySelector('[name="mode"]:checked').value;
       draft.token = view.body.querySelector('[name="token"]').value;
       draft.http_url = view.body.querySelector('[name="http_url"]').value;
+      draft.ws_url = view.body.querySelector('[name="ws_url"]').value.trim();
     }
   }
   function next() {
@@ -191,6 +216,12 @@ function onebotWizard(existing) {
       error = "QQ 号应只包含数字。";
     if (step === 1 && draft.mode === "http" && !draft.http_url)
       error = "请填写协议端的 HTTP API 地址。";
+    if (
+      step === 1 &&
+      draft.mode === "forward_ws" &&
+      !/^wss?:\/\//.test(draft.ws_url)
+    )
+      error = "请填写 ws:// 或 wss:// 开头的协议端 WebSocket 地址。";
     if (error) {
       view.body.querySelector("#wizard-error").textContent = error;
       return;
@@ -210,6 +241,7 @@ function onebotWizard(existing) {
           body: {
             ...draft,
             http_url: draft.mode === "http" ? draft.http_url : null,
+            ws_url: draft.mode === "forward_ws" ? draft.ws_url : null,
             token: draft.token || null,
           },
         },
