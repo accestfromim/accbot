@@ -44,6 +44,7 @@ class Model:
         self.requests = []
         self.responder = responder
         self.summary_failures = 0
+        self.summary_responder = None
 
     async def generate(self, items, tools=(), *, system_prompt_id=None, persona_id=None, **options):
         if system_prompt_id is not None:
@@ -51,7 +52,9 @@ class Model:
             items = [ModelItem.text("system", content), *items]
         items = render_items(items)
         self.requests.append((list(items), tools, options))
-        if options.get("tool_choice") == "none":
+        if options.get("tool_choice") == "auto":
+            if self.summary_responder:
+                return await self.summary_responder(items, tools, options)
             if self.summary_failures:
                 self.summary_failures -= 1
                 return GenerationResult(items=(ModelItem.text("assistant", "invalid memory"),))
@@ -348,7 +351,8 @@ def test_group_gates_dedup_quote_memory_and_restart(setup_ai):
             assert channel.store.load().summary == "群友喜欢猫"
             assert not channel.store.pending_path.exists()
             assert "我喜欢猫" in str(model.requests[-1][0])
-            assert model.requests[-1][2]["tool_choice"] == "none"
+            assert model.requests[-1][2]["tool_choice"] == "auto"
+            assert {t.id for t in model.requests[-1][1]} == {"ai.chat.update_user_profile"}
             reloaded = await runtime.reload("ai.tools")
             assert not reloaded["failed"]
             restored = runtime.plugins.instances["ai.chat"][0]
@@ -733,7 +737,7 @@ def test_reload_drains_old_generation_and_never_replays_side_effects(setup_ai):
             assert len(runtime.messages.adapters["main"].sent) == 1
             assert runtime.messages.adapters["main"].sent[0][1].plain_text == "progress"
             assert step == 2
-            assert any(o.get("tool_choice") == "none" for _, _, o in model.requests)
+            assert any(o.get("tool_choice") == "auto" for _, _, o in model.requests)
         finally:
             release.set()
             await runtime.close()
@@ -813,7 +817,7 @@ def test_real_model_codecs_with_tool_loop_and_memory(setup_ai, protocol):
         def provider(request):
             body = json.loads(request.content)
             requests.append(body)
-            if body.get("tool_choice") == "none":
+            if body.get("tool_choice") == "auto":
                 assert (body.get("response_format") if protocol == "chat" else body["text"]["format"]) == {
                     "type": "json_object"
                 }
@@ -966,7 +970,7 @@ def test_wake_reschedules_only_its_group_and_stale_events_do_nothing(setup_ai):
             await summarize(runtime, plugin, a)
             await runtime.jobs.drain()
             assert a.session is None and not a.records and not b.records
-            assert sum(o.get("tool_choice") == "none" for _, _, o in model.requests) == 2
+            assert sum(o.get("tool_choice") == "auto" for _, _, o in model.requests) == 2
         finally:
             await runtime.close()
 

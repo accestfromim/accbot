@@ -2,7 +2,7 @@
 
 import hashlib
 
-from accbot import ConversationRef
+from accbot import ConversationRef, UserRef
 from accbot.types import FrozenModel
 
 
@@ -20,6 +20,15 @@ class MemoryKey(FrozenModel):
             scope="" if conversation.platform == "qq" else conversation.scope,
             kind=conversation.kind,
             id=conversation.id,
+        )
+
+    @classmethod
+    def of_user(cls, user: UserRef):
+        return cls(
+            platform=user.platform,
+            scope="" if user.platform == "qq" else user.scope,
+            kind="user",
+            id=user.id,
         )
 
     @property

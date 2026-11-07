@@ -14,7 +14,7 @@ from accbot import ConversationRef, MessageChain, MessageReceived, ToolContext
 from accbot.events import MessageSent
 
 from .agent import tool_cost
-from .context import Entry, cost
+from .context import Entry
 from .events import SummarizeMemory
 from .identity import MemoryKey
 from .memory import Record, Store, empty_memory
@@ -263,25 +263,22 @@ class Sessions:
             if not self.closed and self.ctx.owner.active:
                 # A retired generation must not resolve its old tool prompts again.
                 memory = channel.store.load() if persistent else empty_memory()
-                remaining = (
+                selected = self.agent.context(
+                    memory,
+                    record.owner,
+                    context.metadata.get("bot"),
+                    record.turns[:index],
+                    trace,
                     self.config.context_budget
                     - self.config.output_reserve
-                    - cost(self.agent.prefix(memory, record.owner, context.metadata.get("bot")))
                     - self.agent.prompt_cost(
                         self.config.owner_prompt_id if record.owner else self.config.chat_prompt_id,
                         self.config.persona_id,
                         tools,
                     )
-                    - tool_cost(tools)
-                    - cost(trace)
+                    - tool_cost(tools),
                 )
-                keep_from = index
-                for i in range(index - 1, -1, -1):
-                    remaining -= cost(record.turns[i])
-                    if remaining < 0:
-                        break
-                    keep_from = i
-                del record.turns[:keep_from]
+                del record.turns[: selected.first_turn]
                 checkpoint()
 
     def seal(self, channel):
@@ -309,8 +306,10 @@ class Sessions:
                     memory = await self.agent.summarize(
                         record,
                         channel.store.load(),
-                        self.plugin.tool_list(record.owner, channel.conversation.kind),
+                        self.plugin.memory_tools(),
                         self.config,
+                        ToolContext(conversation=channel.conversation, correlation_id=record.id),
+                        lambda: not self.closed and self.ctx.owner.active,
                     )
                     channel.store.save(memory, record.id)
                 channel.records.pop(0)

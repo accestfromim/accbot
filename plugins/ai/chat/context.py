@@ -2,7 +2,7 @@
 
 import hashlib
 import json
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from accbot import AssetRef, ChatMessage, ModelItem, ModelPart, ModelQuote, User
@@ -80,23 +80,35 @@ def cost(items: Sequence[ModelItem]) -> int:
     return total
 
 
+@dataclass
+class Window:
+    items: list[ModelItem]
+    first_turn: int
+
+
 def window(
-    prefix: Sequence[ModelItem],
+    prefix: Sequence[ModelItem] | Callable[[Sequence[ModelItem]], Sequence[ModelItem]],
     turns: Sequence[Sequence[ModelItem]],
     current: Sequence[ModelItem],
     budget: int,
-) -> list[ModelItem]:
-    remaining = budget - cost(prefix) - cost(current)
-    if remaining < 0:
+) -> Window:
+    def prepend(items):
+        return list(prefix(items) if callable(prefix) else prefix)
+
+    items, first_turn = list(current), len(turns)
+    header, used = prepend(items), cost(current)
+    if cost(header) + used > budget:
         raise ValueError("当前轮次超过上下文预算，请缩短消息或提高预算")
-    kept = []
-    for turn in reversed(turns):
+    for index in range(len(turns) - 1, -1, -1):
+        turn = turns[index]
         size = cost(turn)
-        if size > remaining:
+        candidate = list(turn) + items
+        candidate_header = prepend(candidate)
+        if cost(candidate_header) + used + size > budget:
             break
-        remaining -= size
-        kept.append(turn)
-    return list(prefix) + [item for turn in reversed(kept) for item in turn] + list(current)
+        used += size
+        items, header, first_turn = candidate, candidate_header, index
+    return Window(header + items, first_turn)
 
 
 def close_tool_calls(items: Sequence[ModelItem]) -> list[ModelItem]:

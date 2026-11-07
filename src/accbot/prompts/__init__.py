@@ -24,7 +24,7 @@ def default_prompts() -> tuple[SystemPromptCard, ...]:
         )
         for key, name, description in (
             ("chat", "群聊基础", "群聊参与和自然回复，可组合人格、插件与工具补充。"),
-            ("memory", "记忆整理", "将聊天记录整理为官方聊天插件使用的 JSON 记忆。"),
+            ("memory", "记忆整理", "按需维护用户画像，再将聊天记录整理为本会话的 JSON 记忆。"),
             ("owner", "主人私聊", "配合官方聊天插件已校验的主人私聊通道。"),
         )
     )

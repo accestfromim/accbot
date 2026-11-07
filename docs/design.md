@@ -14,6 +14,8 @@ accbot 是面向群体聊天的 Python AI 机器人框架。多个参与者、�
 
 插件负责是否参与聊天、会话推进、上下文与工具组装、模型调用顺序、人格应用、记忆整理、内部参数和业务文件。无需强制的 ChatStrategy 接口、上下文序列化插件、权限系统或通用业务存储层。
 
+官方聊天插件分别保存群会话记忆和共享用户画像。画像按稳定用户身份各存一份 Markdown，由整理模型按需建立；上下文仅注入窗口中发言者及引用用户的已有画像，置于会话记忆之后并计入预算。会话总结先允许画像工具循环，再验证和提交群记忆 JSON；画像并发更新使用文档 revision 检查。以上均为插件业务，不增加框架存储职责。
+
 适配器属于框架源码，不是插件类型。新协议通过修改框架和提交 PR 添加。框架保持协议无关；首个实现是 OneBot 11。
 
 ## 身份与消息
@@ -118,7 +120,7 @@ unload 是逻辑卸载；旧任务持有旧模块和对象直到完成。重新�
 | 模板与提示词补充 | [系统提示词](system-prompts.md)，`prompts/`、`plugins/prompts.py` |
 | 配置、资源与业务文件 | [目录约定](directories.md)，`config/`、`personas/` |
 | 插件配置页面 | [前端接口](plugin-frontend.md)，`plugins/frontend.py`、`web/routes/plugin_ui.py`、`frontend/js/plugin-panel.js` |
-| 默认聊天策略、记忆与工具 | [AI 插件](ai-plugins.md)，`plugins/ai/` |
+| 默认聊天策略、群记忆、用户画像与工具 | [AI 插件](ai-plugins.md)，`plugins/ai/`，画像实现位于 `plugins/ai/chat/profiles.py` |
 | OneBot 消息解析、事件跟踪、API 与连接生命周期 | [OneBot 接入](onebot.md)、[OneBot 11 协议](https://github.com/botuniverse/onebot-11)，`adapters/onebot.py`、`adapters/onebot_message.py`、`adapters/onebot_ws.py` |
 
 除 `plugins/ai/` 外，表中源码路径相对 `src/accbot/`。
@@ -142,5 +144,6 @@ unload 是逻辑卸载；旧任务持有旧模块和对象直到完成。重新�
 - [x] 管理 API 不回显密钥，插件配置页面保留版本检查和清理机制。
 - [x] 插件页面可读取含未激活配置的接入目录；聊天配置中接入 ID 不存在或暂时无法核对时仅提示，不阻止保存。
 - [x] 群记忆使用稳定身份，定时整理只重设当前会话，恢复不重放工具。
+- [x] 用户画像按稳定身份保存，按实际上下文窗口注入并计入预算；总结工具可按需建档与更新，版本冲突不覆盖新画像，失败保留待整理记录。
 - [x] 模型调用使用当前连接的机器人身份，群聊与主人私聊的工具范围隔离。
 - [x] 离线测试、静态检查与格式检查无需真实 QQ 或模型密钥。

@@ -6,6 +6,7 @@ from accbot.events import MessageSent
 
 from .agent import Agent
 from .events import SummarizeMemory
+from .identity import MemoryKey
 from .owner_tools import OwnerTools
 from .sessions import Sessions
 from .settings import Values, load
@@ -147,6 +148,21 @@ class Plugin(BasePlugin):
             for t in self.ctx.tools.list()
             if t.id in names or (t.id.startswith("ai.tools.") and (kind == "group" or t.name != "send_file"))
         )
+
+    def memory_tools(self):
+        return tuple(t for t in self.ctx.tools.list() if t.id == "ai.chat.update_user_profile")
+
+    @Tool(prompt_file="update_user_profile.md")
+    async def update_user_profile(self, user_id: str, content: str, ctx: ToolContext, revision: str = ""):
+        """记忆整理时创建或完整更新上下文中某个用户的 Markdown 画像；revision 使用读取到的版本，新建留空。"""
+        users = {
+            MemoryKey.of_user(user): user
+            for user in ctx.metadata.get("profile_users", ())
+            if user.id == user_id
+        }
+        if not self.ctx.owner.active or len(users) != 1:
+            raise ValueError("仅能在记忆整理阶段更新本次上下文中身份明确的用户画像")
+        return self.agent.profiles.update(next(iter(users.values())), content, revision)
 
     @Tool(prompt_file="stay_silent.md")
     async def stay_silent(self):

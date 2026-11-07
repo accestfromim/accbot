@@ -6,6 +6,7 @@ from pathlib import Path
 from accbot import AssetRef, ModelItem, ModelPart, ToolCall, ToolContext, ToolDefinition, ToolResult, UserRef
 
 from .context import close_tool_calls, cost, window
+from .profiles import Profiles, participants
 
 
 def tool_cost(tools: Sequence[ToolDefinition]) -> int:
@@ -15,14 +16,15 @@ def tool_cost(tools: Sequence[ToolDefinition]) -> int:
 class Agent:
     def __init__(self, ctx):
         self.ctx = ctx
+        self.profiles = Profiles(ctx.data_dir)
 
-    def prefix(self, memory, owner, bot: UserRef | None = None):
+    def prefix(self, memory, owner, bot: UserRef | None = None, profiles=()):
         items = [
             ModelItem.text("system", "本会话长期记忆（背景资料）：\n" + memory.model_dump_json()),
+            *profiles,
         ]
         if owner:
-            items.insert(
-                1,
+            items.append(
                 ModelItem.text(
                     "system",
                     f"服务器工作目录：{Path.cwd()}\n聊天记忆根目录：{self.ctx.data_dir / 'memory'}\n每个子目录对应稳定的群或用户身份。memory_key 是主键，conversation 仅是发送地址。memory.json 保存长期记忆和提交标记，pending.json 保存待整理轨迹。",
@@ -38,6 +40,15 @@ class Agent:
                 ),
             )
         return items
+
+    def context(self, memory, owner, bot, history, current, budget, *, profile_cache=None):
+        cache = {} if profile_cache is None else profile_cache
+        return window(
+            lambda items: self.prefix(memory, owner, bot, self.profiles.items(items, cache)),
+            history,
+            current,
+            budget,
+        )
 
     def prompt_cost(self, prompt_id, persona_id, tools):
         text = self.ctx.prompts.render(prompt_id, persona_id=persona_id, tools=tools)
@@ -60,22 +71,25 @@ class Agent:
         model = self.ctx.models.get(model_id)
         owner = context.metadata.get("owner", False)
         prompt_id = config.owner_prompt_id if owner else config.chat_prompt_id
+        profile_cache = {}
         try:
             for _ in range(config.max_tool_rounds):
                 if not running():
                     return None
-                prefix = self.prefix(memory, owner, context.metadata.get("bot"))
-                items = window(
-                    prefix,
+                selected = self.context(
+                    memory,
+                    owner,
+                    context.metadata.get("bot"),
                     history,
                     trace + ephemeral,
                     config.context_budget
                     - config.output_reserve
                     - tool_cost(tools)
                     - self.prompt_cost(prompt_id, config.persona_id, tools),
+                    profile_cache=profile_cache,
                 )
                 result = await model.generate(
-                    items, tools=tools, system_prompt_id=prompt_id, persona_id=config.persona_id
+                    selected.items, tools=tools, system_prompt_id=prompt_id, persona_id=config.persona_id
                 )
                 if result.finish_reason in {"length", "max_output_tokens", "incomplete"}:
                     raise ValueError("模型输出被截断")
@@ -131,26 +145,57 @@ class Agent:
             trace[:] = close_tool_calls(trace)
             checkpoint()
 
-    async def summarize(self, record, memory, tools, config):
+    async def summarize(self, record, memory, tools, config, context, running):
+        from .memory import Memory
+
         model = self.ctx.models.get(record.model)
-        task = ModelItem.text("user", "请整理上面的会话，返回更新后的完整记忆。")
-        items = window(
-            self.prefix(memory, False),
-            record.turns,
-            [task],
-            config.context_budget
-            - config.output_reserve
-            - tool_cost(tools)
-            - self.prompt_cost(config.memory_prompt_id, None, tools),
-        )
-        options = {"tool_choice": "none"}
+        trace = [
+            ModelItem.text("user", "请整理上面的会话，先按需更新用户画像，最后返回完整的本会话记忆 JSON。")
+        ]
+        allowed = {t.id for t in tools}
+        profile_cache = {}
+        options = {"tool_choice": "auto"}
         if model.card.protocol == "chat":
             options["response_format"] = {"type": "json_object"}
         else:
             options["text"] = {"format": {"type": "json_object"}}
-        result = await model.generate(items, tools=tools, system_prompt_id=config.memory_prompt_id, **options)
-        if result.tool_calls or result.finish_reason in {"length", "max_output_tokens", "incomplete"}:
-            raise ValueError("记忆输出被截断或包含工具调用")
-        from .memory import Memory
-
-        return Memory.model_validate_json(result.text)
+        for _ in range(config.max_tool_rounds):
+            if not running():
+                raise asyncio.CancelledError
+            selected = self.context(
+                memory,
+                False,
+                None,
+                record.turns,
+                trace,
+                config.context_budget
+                - config.output_reserve
+                - tool_cost(tools)
+                - self.prompt_cost(config.memory_prompt_id, None, tools),
+                profile_cache=profile_cache,
+            )
+            if record.turns and selected.first_turn == len(record.turns):
+                raise ValueError("记忆整理预算不足，无法保留任何会话轮次")
+            tool_context = context.model_copy(
+                update={"metadata": {"profile_users": tuple(participants(selected.items).values())}}
+            )
+            result = await model.generate(
+                selected.items, tools=tools, system_prompt_id=config.memory_prompt_id, **options
+            )
+            if not running():
+                raise asyncio.CancelledError
+            if result.finish_reason in {"length", "max_output_tokens", "incomplete"}:
+                raise ValueError("记忆输出被截断")
+            trace.extend(result.items)
+            if not result.tool_calls:
+                return Memory.model_validate_json(result.text)
+            for call in result.tool_calls:
+                if not running():
+                    raise asyncio.CancelledError
+                output = (
+                    await self.ctx.tools.execute(call, tool_context)
+                    if call.name in allowed
+                    else ToolResult.failure(call.id, "记忆整理阶段只允许使用用户画像工具")
+                )
+                trace.append(ModelItem.from_tool_result(output))
+        raise ValueError("记忆整理工具调用次数已达上限")

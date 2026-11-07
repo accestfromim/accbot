@@ -38,7 +38,9 @@ def test_context_trims_whole_turns_and_preserves_current_and_prefix():
     recent = [ModelItem.text("user", "recent"), ModelItem.text("assistant", "answer")]
     current = [ModelItem.text("user", "new")]
     budget = context.cost(prefix + recent + current)
-    assert context.window(prefix, [old, recent], current, budget) == prefix + recent + current
+    selected = context.window(prefix, [old, recent], current, budget)
+    assert selected.items == prefix + recent + current
+    assert selected.first_turn == 1
     with pytest.raises(ValueError):
         context.window(prefix, [], current, 1)
     unfinished = [ModelItem(role="assistant", calls=(ToolCall(id="x", name="send_text"),))]

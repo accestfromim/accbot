@@ -72,6 +72,7 @@ plugins/ai/chat/prompts/
 └─ tools/
    ├─ stay_silent.md         # @Tool(prompt_file="stay_silent.md")
    ├─ view_message_images.md
+   ├─ update_user_profile.md
    ├─ read_file.md
    ├─ write_file.md
    └─ execute_shell.md
@@ -83,4 +84,4 @@ plugins/ai/chat/prompts/
 
 插件需要复杂业务文件结构时，推荐在 `ctx.data_dir` 下自行划分 `config/`、`memory/`、`cache/` 等目录。框架仅分配该路径，不规定记忆格式，也不替插件管理业务存储。
 
-自定义配置页放在插件包的 `frontend/index.html`，搭配可选的 `frontend/index.js`、`frontend/style.css`；配置读写由包根目录 `settings.py` 提供。AI 聊天插件将配置存入 `.accbot/data/plugins/ai.chat/config/settings.json`，记忆存入 `ai.chat/memory/<稳定记忆身份哈希>/`；网络工具下载存入 `ai.tools/downloads/`。详见 [插件配置页面](plugin-frontend.md)。
+自定义配置页放在插件包的 `frontend/index.html`，搭配可选的 `frontend/index.js`、`frontend/style.css`；配置读写由包根目录 `settings.py` 提供。AI 聊天插件将配置存入 `.accbot/data/plugins/ai.chat/config/settings.json`，群记忆存入 `ai.chat/memory/<稳定记忆身份哈希>/`，QQ 用户画像存入 `ai.chat/profiles/qq/user-<QQ号>.md`（其他平台按租户作用域进一步分目录）；网络工具下载存入 `ai.tools/downloads/`。详见 [插件配置页面](plugin-frontend.md) 与 [AI 插件](ai-plugins.md)。
