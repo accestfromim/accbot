@@ -1,3 +1,5 @@
+import { connectionHints } from "./connections.js";
+
 const numeric = [
   ["initial_probability", "首次唤醒概率", 0, 1, 0.01],
   ["busy_probability", "高频首次唤醒概率", 0, 1, 0.01],
@@ -36,6 +38,7 @@ export async function mount(root, api) {
     api.getSettings(),
   ]);
   if (api.signal.aborted) return;
+  const connectField = connectionHints(root, api);
   const select = form.elements.default_model;
   for (const model of models)
     select.add(
@@ -121,7 +124,7 @@ export async function mount(root, api) {
     const grid = document.createElement("div");
     grid.className = "grid";
     grid.append(
-      field("连接 ID", "connection_id", value.connection_id),
+      field("接入配置 ID", "connection_id", value.connection_id),
       field(
         group ? "群 ID" : "用户 ID",
         group ? "group_id" : "user_id",
@@ -129,6 +132,7 @@ export async function mount(root, api) {
       ),
     );
     for (const input of grid.querySelectorAll("input")) input.required = true;
+    connectField(grid.querySelector('[name="connection_id"]'));
     row.append(head, grid);
     if (group) {
       const mentions = field(
@@ -157,6 +161,7 @@ export async function mount(root, api) {
       .addEventListener("click", () => add(kind), { signal: api.signal });
   }
   form.elements.owner_connection.value = values.owner?.connection_id || "";
+  connectField(form.elements.owner_connection);
   form.elements.owner_user.value = values.owner?.user_id || "";
   form.elements.owner_controls.checked = values.owner_controls;
   submit.disabled = false;
@@ -202,7 +207,7 @@ export async function mount(root, api) {
         const connection = form.elements.owner_connection.value.trim();
         const user = form.elements.owner_user.value.trim();
         if (!!connection !== !!user)
-          throw new Error("主人连接 ID 和用户 ID 需要一起填写");
+          throw new Error("主人接入配置 ID 和用户 ID 需要一起填写");
         settings.owner =
           connection && user
             ? { connection_id: connection, user_id: user }

@@ -159,6 +159,16 @@ export function openPluginPanel(plugin) {
         listModels: () => request("models"),
         listPersonas: () => request("personas"),
         listPrompts: () => request("prompts"),
+        listConnections: async () =>
+          (await request("adapters/onebot")).map(
+            ({ id, name, enabled, status }) => ({
+              id,
+              name,
+              platform: "qq",
+              enabled,
+              status,
+            }),
+          ),
         getSettings: async () =>
           (await request(`${prefix}/settings?revision=${descriptor.revision}`))
             .values,

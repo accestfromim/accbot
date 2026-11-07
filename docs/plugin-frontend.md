@@ -41,6 +41,7 @@ plugins/your-group/your-plugin/
 | `await api.listModels()` | 获取现有模型卡，字段包括 id、name、model、protocol；不含密钥值 |
 | `await api.listPersonas()` | 读取框架共享人格目录，包含 id、name、description、system_prompt |
 | `await api.listPrompts()` | 读取框架共享系统提示词卡，包含 id、name、description、content |
+| `await api.listConnections()` | 获取全部已保存的接入配置摘要，包括未激活配置；字段为 id、name、platform、enabled、status，不含凭据 |
 | `await api.getSettings()` | 调用本插件配置处理器的 read，返回插件定义的 JSON 对象 |
 | `await api.saveSettings(values)` | 调用 write，返回插件确认保存的 JSON 对象，并显示保存结果 |
 | `api.notify(text, tone)` | 在侧栏显示提示，tone 支持 success、warn、error、info |
@@ -108,6 +109,7 @@ class Settings(PluginSettings):
 - [settings.py](../plugins/ai/chat/settings.py) 校验模型 ID，自行保存到 `ctx.data_dir / "config/settings.json"`。
 - [plugin.py](../plugins/ai/chat/plugin.py) 启动时读取配置，保存后保存旧会话的待整理记录，并以新配置接收消息。
 - [frontend/](../plugins/ai/chat/frontend/) 提供模型、人格与三种用途的系统提示词选择，以及群聊、主人通道与触发策略配置。
+- 接入配置 ID 提供已有配置的输入建议；不存在时显示字段提示，但不阻止保存，允许先配置聊天规则再添加适配器。读取配置目录失败也只提示无法核对。重新打开页面或返回窗口时刷新目录。
 
 ## 重载和管理接口
 

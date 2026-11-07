@@ -101,7 +101,7 @@ unload 是逻辑卸载；旧任务持有旧模块和对象直到完成。重新�
 
 框架配置、模型卡、适配器配置和插件激活集合拆分存放。详见 [目录约定](directories.md)。密钥只写入框架本地环境配置，读取接口仅提供名称、来源、使用位置和是否已设置，参数校验错误也不回显请求体。
 
-插件可通过固定的 `frontend/index.html` 单根 div 组件及可选 JS/CSS 提供自己的配置侧栏。配置页支持未激活插件；由包根目录 `settings.py` 中的 `Settings(PluginSettings)` 接管校验、读取和保存，业务存储仍由插件自行管理。前端可读取框架模型卡、人格卡和系统提示词卡目录；保存成功后通过 `on_settings_changed` 通知活跃业务实例。
+插件可通过固定的 `frontend/index.html` 单根 div 组件及可选 JS/CSS 提供自己的配置侧栏。配置页支持未激活插件；由包根目录 `settings.py` 中的 `Settings(PluginSettings)` 接管校验、读取和保存，业务存储仍由插件自行管理。前端可读取框架模型卡、人格卡、系统提示词卡目录及全部已保存的接入配置摘要（含未激活配置）；保存成功后通过 `on_settings_changed` 通知活跃业务实例。默认聊天插件对不存在的接入配置 ID 显示提示，允许先保存规则再配置适配器。
 
 插件前端随激活快照更新，旧页面在激活身份或源码版本变化后不能继续保存；关闭和失效时执行组件清理。组件用 Shadow DOM 隔离样式。详情和示例见 [插件配置页面](plugin-frontend.md)。
 
@@ -117,7 +117,7 @@ unload 是逻辑卸载；旧任务持有旧模块和对象直到完成。重新�
 | 模型上下文与协议编码 | [模型上下文](model-context.md)，`models/` |
 | 模板与提示词补充 | [系统提示词](system-prompts.md)，`prompts/`、`plugins/prompts.py` |
 | 配置、资源与业务文件 | [目录约定](directories.md)，`config/`、`personas/` |
-| 插件配置页面 | [前端接口](plugin-frontend.md)，`plugins/frontend.py`、`web/routes/plugin_ui.py` |
+| 插件配置页面 | [前端接口](plugin-frontend.md)，`plugins/frontend.py`、`web/routes/plugin_ui.py`、`frontend/js/plugin-panel.js` |
 | 默认聊天策略、记忆与工具 | [AI 插件](ai-plugins.md)，`plugins/ai/` |
 | OneBot 消息解析、事件跟踪、API 与连接生命周期 | [OneBot 接入](onebot.md)、[OneBot 11 协议](https://github.com/botuniverse/onebot-11)，`adapters/onebot.py`、`adapters/onebot_message.py`、`adapters/onebot_ws.py` |
 
@@ -140,6 +140,7 @@ unload 是逻辑卸载；旧任务持有旧模块和对象直到完成。重新�
 - [x] 相邻用户消息合并保留身份与引用，原生 JSON 输入绕过渲染及卡片注入。
 - [x] 卡片模板完全由用户控制，插件与工具补充按当前激活和工具集合注入。
 - [x] 管理 API 不回显密钥，插件配置页面保留版本检查和清理机制。
+- [x] 插件页面可读取含未激活配置的接入目录；聊天配置中接入 ID 不存在或暂时无法核对时仅提示，不阻止保存。
 - [x] 群记忆使用稳定身份，定时整理只重设当前会话，恢复不重放工具。
 - [x] 模型调用使用当前连接的机器人身份，群聊与主人私聊的工具范围隔离。
 - [x] 离线测试、静态检查与格式检查无需真实 QQ 或模型密钥。

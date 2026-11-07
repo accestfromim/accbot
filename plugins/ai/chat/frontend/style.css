@@ -29,6 +29,12 @@ summary {
   color: var(--muted);
   line-height: 1.7;
 }
+.connection-hint {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--amber);
+  overflow-wrap: anywhere;
+}
 .help {
   margin: 10px 0;
 }
