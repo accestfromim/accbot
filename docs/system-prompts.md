@@ -33,6 +33,8 @@ result = await model.generate(
 
 <plugins_insert_prompt>
 
+本轮能够使用的工具（如果有）：
+
 <tools_insert_prompt>
 ```
 
@@ -99,4 +101,6 @@ class Example(Plugin):
 - [owner](../src/accbot/prompts/defaults/owner.md) 说明已校验的主人私聊中的任务理解、工具执行和结果核验。
 - [memory](../src/accbot/prompts/defaults/memory.md) 说明先按需更新用户画像、再整理会话记忆的顺序，以及记忆字段含义与信息取舍。
 
-chat 和 owner 含三个占位符；memory 通过 `<tools_insert_prompt>` 注入本次画像工具的具体说明，不混入人格或通用插件补充。模板描述场景和行为规则，具体工具参数与限制由工具 Schema 和补充说明提供。用户可编辑、替换或删除这些卡片，删除后重启不会重新创建。
+源码中的模板用于初始化运行目录中的卡片；人格卡同样从 `src/accbot/personas/default.json` 初始化。此后前端编辑运行目录中的文件，更新源码模板或重复运行 `init` 不会覆盖已有卡片。若要采用更新后的模板，应通过前端更新正文，或同步到运行目录的对应文件后重启服务。
+
+chat 和 owner 含三个占位符；memory 通过 `<tools_insert_prompt>` 注入本次画像工具的具体说明，不混入人格或通用插件补充。三张模板在工具占位符前均写明“本轮能够使用的工具（如果有）：”；这句话也由用户编辑，框架不强制追加。模板描述场景和行为规则，具体工具参数与限制由工具 Schema 和补充说明提供。用户可编辑、替换或删除这些卡片，删除后重启不会重新创建。

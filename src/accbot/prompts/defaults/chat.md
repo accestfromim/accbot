@@ -26,4 +26,6 @@
 
 <plugins_insert_prompt>
 
+本轮能够使用的工具（如果有）：
+
 <tools_insert_prompt>
