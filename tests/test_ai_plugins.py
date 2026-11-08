@@ -444,7 +444,7 @@ def test_inflight_fifo_expiry_and_cross_group_progress(setup_ai):
     asyncio.run(run())
 
 
-def test_parallel_tools_silence_and_allowlist(setup_ai):
+def test_parallel_tools_silence_and_allowlist(setup_ai, monkeypatch):
     async def run():
         step = 0
 
@@ -465,13 +465,44 @@ def test_parallel_tools_silence_and_allowlist(setup_ai):
             )
 
         runtime, plugin, model = await setup_ai(respond)
+        executed = []
+        execute = runtime.tools.execute
+
+        async def record_execution(call, context):
+            executed.append(call.name)
+            return await execute(call, context)
+
+        monkeypatch.setattr(runtime.tools, "execute", record_execution)
         try:
             await deliver(runtime, event())
             assert len(runtime.messages.adapters["main"].sent) == 1
             assert runtime.messages.adapters["main"].sent[0][1].plain_text == "进度"
             record = next(iter(plugin.sessions.channels.values())).records[0]
             assert len([i for i in record.turns[0] if i.kind == "tool_result"]) == 4
+            assert executed == ["ai.tools.send_text", "ai.chat.stay_silent"]
             assert all("jm" not in t.name for t in runtime.tools.list())
+        finally:
+            await runtime.close()
+
+    asyncio.run(run())
+
+
+def test_same_name_and_content_keep_distinct_platform_message_ids(setup_ai):
+    async def run():
+        runtime, plugin, _ = await setup_ai()
+        try:
+            first = event("message-a", user="200", text="相同内容", mention=False)
+            second = event("message-b", user="201", text="相同内容", mention=False)
+            await deliver(runtime, first)
+            await deliver(runtime, second)
+            channel = next(iter(plugin.sessions.channels.values()))
+            a, b = channel.recent
+            assert a.nickname == b.nickname and a.text == b.text
+            assert a.id == "message-a" and b.id == "message-b"
+            quoted = type(a).from_message(event("reply", reply="message-a").message, 0)
+            rendered = quoted.render(channel.known, set())
+            assert rendered.message_id == "reply" and rendered.reply_to.message_id == "message-a"
+            assert rendered.reply_to.sender.ref == first.message.sender.ref
         finally:
             await runtime.close()
 
@@ -592,7 +623,7 @@ def test_owner_identity_controls_and_stateless_private(setup_ai, tmp_path):
             owner_names = {t.name for t in model.requests[-1][1]}
             assert {"read_file", "write_file", "execute_shell"} <= owner_names
             assert owner_names == {t.name for t in runtime.tools.list()}
-            assert "execute_shell" not in {t.name for t in plugin.tool_list(False)}
+            assert "execute_shell" not in {t.name for t in plugin.tool_list()}
             target = tmp_path / "owner.txt"
             context = ToolContext(
                 conversation=owner_event.message.conversation, metadata={"message": owner_event.message}

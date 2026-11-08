@@ -130,9 +130,6 @@ class JobManager:
                     await self.events.publish(event, source=owner)
                 except FrameworkError:
                     log.warning("background result has no available event destination: %s", task_id)
-            except asyncio.CancelledError:
-                self.history[task_id]["status"] = "cancelled"
-                raise
             except Exception as exc:
                 self.history[task_id]["status"] = "failed"
                 try:
@@ -149,17 +146,37 @@ class JobManager:
                     )
                 except Exception:
                     log.exception("could not publish background task failure: %s", task_id)
-            finally:
-                owner.release()
-                self.tasks.pop(task_id, None)
-                for key in tuple(self.history):
-                    if len(self.history) <= self.history_limit:
-                        break
-                    if key not in self.tasks:
-                        self.history.pop(key)
 
-        self.tasks[task_id] = asyncio.create_task(run(), name=f"accbot.job.{task_id}")
+        def finished(task):
+            # A task can be cancelled before its coroutine enters any try/finally.
+            if task.cancelled():
+                self.history[task_id]["status"] = "cancelled"
+            owner.release()
+            self.tasks.pop(task_id, None)
+            for key in tuple(self.history):
+                if len(self.history) <= self.history_limit:
+                    break
+                if key not in self.tasks:
+                    self.history.pop(key)
+
+        task = self.tasks[task_id] = asyncio.create_task(run(), name=f"accbot.job.{task_id}")
+        task.add_done_callback(finished)
         return task_id
+
+    async def stop(self, owner: Activation, task_ids, *, timeout=0):
+        if timeout < 0:
+            raise FrameworkError(ErrorCode.INVALID_ARGUMENT, "job stop timeout must not be negative")
+        selected = set(task_ids)
+        tasks = [
+            task
+            for key, task in self.tasks.items()
+            if key in selected and self.history[key]["activation_id"] == owner.id
+        ]
+        if tasks:
+            _, pending = await asyncio.wait(tasks, timeout=timeout)
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     async def drain(self):
         if self.tasks:

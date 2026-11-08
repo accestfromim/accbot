@@ -1,6 +1,5 @@
 """Conversation rendering and whole-turn context budgeting, independent of providers."""
 
-import hashlib
 import json
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -36,10 +35,7 @@ class Entry:
                 text.append("[图片]")
                 images.append(part.asset)
         text = "".join(text)
-        digest = hashlib.sha256(
-            (nickname + "\0" + text + "".join(a.platform_file_id or a.id for a in images)).encode()
-        ).hexdigest()[:16]
-        return cls(message, arrived, "id_" + digest, text, nickname, tuple(images))
+        return cls(message, arrived, message.ref.id, text, nickname, tuple(images))
 
     def render(self, known, visible):
         message = self.message

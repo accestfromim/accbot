@@ -2,6 +2,9 @@
 
 Read `docs/design.md` before changing framework contracts. Keep its checklist and reference index current. Document current behavior, not development conversations or implementation history.
 
+- If a requested change appears to come from a misunderstanding of an existing design, explain that design's purpose and the tradeoff, then obtain confirmation before changing it.
+- Prefer less code and simpler execution paths. In-flight business state across source reloads has no consistency guarantee; do not add coordination layers for it. Official plugins should use public framework services instead of internal registries.
+
 - Adapters belong to framework source. Chat participation, context, memory, prompt/persona selection, tool selection and business storage belong to plugins.
 - Keep the default AI plugins in `plugins/ai/` and test fixtures in `tests/fixtures/`.
 - ModelItem has typed sender/time/message/conversation/quote fields. Serialization merges adjacent ordinary user items, preserving system, assistant, tool and provider boundaries. Plugins own history stability. Raw JSON message arrays bypass rendering and prompt/persona selection.

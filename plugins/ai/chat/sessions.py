@@ -342,10 +342,9 @@ class Sessions:
             if rule is None:
                 continue
             identity = rule.group_id if conversation.kind == "group" else rule.user_id
-            adapter = self.ctx.messages.adapters.get(rule.connection_id)
-            if identity != conversation.id or adapter is None:
+            connection = self.ctx.messages.get_connection(rule.connection_id)
+            if identity != conversation.id or connection is None:
                 continue
-            connection = adapter.connection
             candidate = conversation.model_copy(
                 update={
                     "connection_id": connection.id,
@@ -394,15 +393,6 @@ class Sessions:
             self.cancel(channel, "idle")
             self.cancel(channel, "retry")
             channel.store.journal(channel.records)
-        tasks = [
-            self.ctx.runtime.jobs.tasks[c.worker_id]
-            for c in self.channels.values()
-            if c.worker_id in self.ctx.runtime.jobs.tasks
-        ]
-        if tasks:
-            _, pending = await asyncio.wait(tasks, timeout=5)
-            for task in pending:
-                task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
+        await self.ctx.stop_jobs((c.worker_id for c in self.channels.values() if c.worker_id), timeout=5)
         for channel in self.channels.values():
             channel.store.journal(channel.records)

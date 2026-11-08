@@ -99,20 +99,12 @@ class Agent:
                     if not result.text.strip():
                         raise ValueError("模型既未返回正文，也未选择工具")
                     return result.text
-                silent = [c for c in result.tool_calls if c.name == "ai.chat.stay_silent"]
-                if len(result.tool_calls) == 1 and silent and not silent[0].arguments:
-                    trace.append(
-                        ModelItem.from_tool_result(
-                            ToolResult(call_id=silent[0].id, ok=True, value={"silent": True})
-                        )
-                    )
-                    checkpoint()
-                    return None
+                silent = len(result.tool_calls) == 1 and result.tool_calls[0].name == "ai.chat.stay_silent"
 
                 async def execute(call: ToolCall) -> ToolResult:
                     if call.name not in allowed:
                         return ToolResult.failure(call.id, "该工具不在本会话的可用列表中")
-                    if call.name == "ai.chat.stay_silent":
+                    if call.name == "ai.chat.stay_silent" and not silent:
                         return ToolResult.failure(call.id, "stay_silent 必须无参数且单独调用")
                     if not running():
                         return ToolResult.failure(call.id, "插件已停止，未开始执行")
@@ -140,6 +132,8 @@ class Agent:
                             )
                     trace.append(ModelItem.from_tool_result(output))
                 checkpoint()
+                if silent and outputs[0].ok:
+                    return None
             raise ValueError("本轮工具调用次数已达上限")
         finally:
             trace[:] = close_tool_calls(trace)

@@ -27,10 +27,12 @@
 | `ctx.messages.send(conversation, chain, reply_to=...)` | 按连接路由消息，返回发送回执 |
 | `ctx.messages.send_file(conversation, asset)` | 使用适配器的独立文件上传操作并发布 FileSent |
 | `ctx.messages.fetch(message_ref)` | 在适配器支持时查询引用消息；不发布新的接收事件，不支持或消息已失效时抛异常 |
+| `ctx.messages.get_connection(id)` | 查询已配置的活动接入身份，返回不可变 ConnectionRef；不存在时返回 None，不暴露适配器对象 |
 | `ctx.tools.list()` | 当前活跃工具目录，调用插件自行筛选 |
 | `ToolDefinition.to_schema(protocol)` | 把内部工具声明编码为 chat/responses 的函数 Schema |
 | `await ctx.tools.execute(call, context)` | 参数验证、执行与工具结果 |
 | `ctx.spawn(async_operation)` | 通过框架登记后台任务，立即返回任务 ID |
+| `await ctx.stop_jobs(task_ids, timeout=0)` | 等待指定任务至超时，再取消尚未完成者；仅处理本次激活拥有的任务，忽略其他或已结束的任务 |
 | `ctx.runtime.assets.read(asset, max_bytes=...)` | 按需读取有大小限制的媒体 |
 | `ctx.data_dir` | 插件自主管理的数据目录路径 |
 | `PluginSettings.read()` / `write(values)` | 插件配置页面的读写接口，在 settings.py 中实现 |
@@ -39,6 +41,8 @@
 `@Tool` 根据函数类型注解生成参数 Schema，保留 `Annotated[T, Field(...)]` 的范围、长度等约束，执行时用相同模型严格校验；注解为 `ToolContext` 的单个参数由执行器注入，不出现在模型参数中。Pydantic 参数类会以该类的实例交给工具函数。工具 ID 为 `plugin_id.local_name`；工具声明生成稳定、无冲突的合法 wire name，模型协议层将返回调用映射回工具 ID。
 
 `@async_tool` 和普通异步函数不同：它表示接受后台作业。执行返回 accepted 与 task_id，最终由 TaskCompleted 或 TaskFailed 报告结果。停用不取消这些作业，回执不自动交给新插件实例。
+
+`stop_jobs` 是插件显式管理自身任务的接口，不由卸载操作自动调用。官方聊天插件用它停止保存了 ID 的会话工作任务，不扫描任务表，也不停止工具执行器接受的其他后台任务。
 
 两个工具装饰器都接受 `prompt_file="name.md"`，从所属插件的 `prompts/tools/name.md` 读取补充提示词。`ToolDefinition.system_prompt` 保存激活时正文快照，`activation_id` 标记所属激活；二者不进入供应商工具 Schema。`prompts/system.md` 自动注册为插件补充；详细规则见 [系统提示词](system-prompts.md)。
 
@@ -58,6 +62,8 @@
 | `ToolResult` | 调用结果、错误或后台 task_id，业务值位于 value |
 
 接收和发送事件的消息内容均为 MessageChain。发送纯文本可显式使用 `MessageChain.text(text)`；`messages.send(target, text)` 是在入口立即转换为 MessageChain 的快捷形式，不会让裸字符串进入发送事件。裸 list 不是发送消息类型。
+
+消息和文件均由 MessageSender 校验会话身份、按连接选择适配器、取得回执并发布结果事件。事件通知失败不会改变已经取得的发送结果或覆盖原始发送异常；无法判定结果的底层异常标记为 unknown，不自动重发。
 
 `model.generate` 接受 `Sequence[ModelItem] | str` 和 `Sequence[ToolDefinition]`，返回 GenerationResult。ModelItem 模式不需要自行拼接供应商消息字典；字符串模式要求当前协议原生消息数组的 JSON 文本。上下文中的工具执行结果使用 `ModelItem.from_tool_result(result)`，在这里才把 ToolResult 序列化为模型可读 JSON。工具的业务返回内容和自定义平台载荷仍可为 JSON 值。
 

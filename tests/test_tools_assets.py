@@ -7,6 +7,7 @@ from accbot import AssetRef, FrameworkError, Tool, ToolCall, ToolContext, async_
 from accbot.events import EventBus, TaskFailed
 from accbot.lifecycle import Activation
 from accbot.messages import AssetReader
+from accbot.plugins.base import PluginContext
 from accbot.tools import JobManager, ToolRegistry
 
 
@@ -70,5 +71,53 @@ def test_asset_read_limits_and_inline_decode(tmp_path):
             for asset in (AssetRef(path=str(file)), AssetRef(url="https://media.test/a")):
                 with pytest.raises(FrameworkError):
                     await assets.read(asset, max_bytes=4)
+
+    asyncio.run(run())
+
+
+def test_stop_jobs_only_stops_selected_jobs_owned_by_the_context(runtime, tmp_path):
+    async def run():
+        owner, other = Activation("first"), Activation("second")
+        owner.activate()
+        other.activate()
+        context = PluginContext(runtime, runtime.plugins, owner, tmp_path)
+        release = asyncio.Event()
+        selected = context.spawn(release.wait)
+        remaining = context.spawn(release.wait)
+        foreign = runtime.jobs.submit(other, release.wait)
+        try:
+            await context.stop_jobs([selected, foreign, "missing"])
+            assert runtime.jobs.history[selected]["status"] == "cancelled"
+            assert set(runtime.jobs.tasks) == {remaining, foreign}
+            release.set()
+            await context.stop_jobs([remaining], timeout=1)
+            await runtime.jobs.drain()
+            assert runtime.jobs.history[remaining]["status"] == "completed"
+            assert runtime.jobs.history[foreign]["status"] == "completed"
+            assert owner.inflight == other.inflight == 0
+        finally:
+            release.set()
+            owner.retire()
+            other.retire()
+            await runtime.close()
+
+    asyncio.run(run())
+
+
+def test_job_cancelled_before_start_releases_its_registration_lease():
+    async def run():
+        bus = EventBus()
+        jobs, owner = JobManager(bus), Activation("sample")
+        owner.activate()
+
+        async def never_started():
+            pytest.fail("cancelled job must not run")
+
+        job_id = jobs.submit(owner, never_started)
+        await jobs.close()
+        assert not jobs.tasks and owner.inflight == 0
+        assert jobs.history[job_id]["status"] == "cancelled"
+        owner.retire()
+        await bus.close()
 
     asyncio.run(run())

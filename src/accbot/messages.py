@@ -33,14 +33,25 @@ class MessageSender:
             raise FrameworkError(ErrorCode.CONFLICT, f"connection already exists: {key}")
         self.adapters[key] = adapter
 
+    def get_connection(self, connection_id: str) -> ConnectionRef | None:
+        adapter = self.adapters.get(connection_id)
+        return adapter.connection if adapter is not None else None
+
+    def _adapter(self, target: ConversationRef) -> Adapter:
+        adapter = self.adapters.get(target.connection_id)
+        if adapter is None:
+            raise FrameworkError(ErrorCode.NOT_FOUND, "conversation connection is not configured")
+        if (target.platform, target.scope) != (adapter.connection.platform, adapter.connection.scope):
+            raise FrameworkError(
+                ErrorCode.INVALID_ARGUMENT, "conversation identity does not match connection"
+            )
+        return adapter
+
     async def fetch(self, ref: MessageRef):
         """Fetch a known message reference when the adapter supports history lookup."""
-        target = ref.conversation
-        adapter = self.adapters.get(target.connection_id)
-        if adapter is None or not hasattr(adapter, "fetch"):
+        adapter = self._adapter(ref.conversation)
+        if not hasattr(adapter, "fetch"):
             raise FrameworkError(ErrorCode.UNSUPPORTED, "adapter does not support message lookup")
-        if (target.platform, target.scope) != (adapter.connection.platform, adapter.connection.scope):
-            raise FrameworkError(ErrorCode.INVALID_ARGUMENT, "message identity does not match connection")
         message = await adapter.fetch(ref)
         if message.ref != ref:
             raise FrameworkError(ErrorCode.PROVIDER, "adapter returned a different message reference")
@@ -49,13 +60,6 @@ class MessageSender:
     async def send(
         self, target: ConversationRef, content: MessageChain | str, *, reply_to=None
     ) -> SendReceipt:
-        adapter = self.adapters.get(target.connection_id)
-        if adapter is None:
-            raise FrameworkError(ErrorCode.NOT_FOUND, "conversation connection is not configured")
-        if (target.platform, target.scope) != (adapter.connection.platform, adapter.connection.scope):
-            raise FrameworkError(
-                ErrorCode.INVALID_ARGUMENT, "conversation identity does not match connection"
-            )
         if reply_to is not None and reply_to.conversation != target:
             raise FrameworkError(
                 ErrorCode.INVALID_ARGUMENT, "cannot quote a message from another conversation"
@@ -65,57 +69,42 @@ class MessageSender:
             raise FrameworkError(ErrorCode.INVALID_ARGUMENT, "send requires a MessageChain or text")
         if not content.segments:
             raise FrameworkError(ErrorCode.INVALID_ARGUMENT, "empty message")
+        return await self._send(target, "send", content, reply_to=reply_to)
+
+    async def send_file(self, target: ConversationRef, asset: AssetRef) -> SendReceipt:
+        return await self._send(target, "send_file", asset)
+
+    async def _notify(self, event):
+        try:
+            await self.events.publish(event)
+        except Exception:
+            # Notification failure must not change the result of the platform operation.
+            log.exception("send notification could not be queued: %s", event.event_type)
+
+    async def _send(self, target, operation, content, **options) -> SendReceipt:
+        adapter = self._adapter(target)
+        send = getattr(adapter, operation, None)
+        if send is None:
+            raise FrameworkError(ErrorCode.UNSUPPORTED, f"adapter does not support {operation}")
         request_id = new_id()
         try:
-            receipt = await adapter.send(target, content, reply_to=reply_to, request_id=request_id)
+            receipt = await send(target, content, request_id=request_id, **options)
         except Exception as exc:
             failure = error_info(exc, request_id)
             if not isinstance(exc, FrameworkError):
                 failure = failure.model_copy(update={"outcome": Outcome.UNKNOWN})
-            await self.events.publish(
+            await self._notify(
                 MessageSendFailed(
                     connection=adapter.connection, request_id=request_id, target=target, error=failure
                 )
             )
             raise
-        try:
-            await self.events.publish(
-                MessageSent(connection=adapter.connection, receipt=receipt, content=content)
-            )
-        except FrameworkError:
-            log.warning("sent receipt notification could not be queued: %s", request_id)
-        return receipt
-
-    async def send_file(self, target: ConversationRef, asset: AssetRef) -> SendReceipt:
-        adapter = self.adapters.get(target.connection_id)
-        if adapter is None:
-            raise FrameworkError(ErrorCode.NOT_FOUND, "conversation connection is not configured")
-        if (target.platform, target.scope) != (adapter.connection.platform, adapter.connection.scope):
-            raise FrameworkError(
-                ErrorCode.INVALID_ARGUMENT, "conversation identity does not match connection"
-            )
-        request_id = new_id()
-        upload = getattr(adapter, "send_file", None)
-        if upload is None:
-            raise FrameworkError(ErrorCode.UNSUPPORTED, "adapter does not support file uploads")
-        try:
-            receipt = await upload(target, asset, request_id=request_id)
-        except Exception as exc:
-            await self.events.publish(
-                MessageSendFailed(
-                    connection=adapter.connection,
-                    request_id=request_id,
-                    target=target,
-                    error=error_info(exc, request_id),
-                )
-            )
-            raise
-        try:
-            await self.events.publish(
-                FileSent(connection=adapter.connection, conversation=target, asset=asset, receipt=receipt)
-            )
-        except FrameworkError:
-            log.warning("file receipt notification could not be queued: %s", request_id)
+        event = (
+            MessageSent(connection=adapter.connection, receipt=receipt, content=content)
+            if operation == "send"
+            else FileSent(connection=adapter.connection, conversation=target, asset=content, receipt=receipt)
+        )
+        await self._notify(event)
         return receipt
 
 

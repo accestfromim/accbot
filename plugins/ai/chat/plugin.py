@@ -137,9 +137,7 @@ class Plugin(BasePlugin):
         ):
             raise PermissionError("控制工具只允许已配置主人的真实私聊消息")
 
-    def tool_list(self, owner=False, kind="group") -> tuple[ToolDefinition, ...]:
-        if owner and self.config.owner_controls:
-            return self.ctx.tools.list()
+    def tool_list(self, kind="group") -> tuple[ToolDefinition, ...]:
         names = {"ai.chat.stay_silent"}
         if kind == "group":
             names.add("ai.chat.view_message_images")

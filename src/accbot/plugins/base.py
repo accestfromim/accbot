@@ -69,6 +69,10 @@ class PluginContext:
     def spawn(self, operation, *, correlation_id=None):
         return self.runtime.jobs.submit(self.owner, operation, correlation_id=correlation_id)
 
+    async def stop_jobs(self, task_ids, *, timeout=0):
+        """Wait briefly, then cancel selected jobs belonging to this plugin activation."""
+        await self.runtime.jobs.stop(self.owner, task_ids, timeout=timeout)
+
 
 class ApiHandle:
     def __init__(self, owner: Activation, api):
