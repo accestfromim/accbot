@@ -78,7 +78,7 @@ class Sessions:
         ticket = uuid4().hex
         event = SummarizeMemory(memory_key=channel.store.key, ticket=ticket, reason=reason)
         setattr(channel, f"{reason}_ticket", ticket)
-        setattr(channel, f"{reason}_timer", self.ctx.schedule(event, delay=delay))
+        setattr(channel, f"{reason}_timer", self.ctx.schedule(event, when=delay))
 
     def enqueue(self, channel, operation):
         channel.queue.append(operation)

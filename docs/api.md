@@ -15,7 +15,7 @@
 | `GroupMatch(connection_id=..., group_id=...)` | 配置用群条件，限定一条连接中的群；可直接交给 group |
 | `ctx.register_event(EventClass)` | 注册自定义事件子类，声明独立 `event_type` |
 | `await ctx.publish(event)` | 发布事件并获得 EventReceipt；`await receipt.wait()` 等待广播结束 |
-| `ctx.schedule(event_or_factory, delay=..., interval=...)` | 创建按激活身份失效的定时器 |
+| `ctx.schedule(event_or_factory, when, repeat=False)` | 延时或指定时刻发布事件；重复时分别按固定间隔或每日执行，返回定时器 ID |
 | `ctx.cancel_timer(timer_id)` | 取消本次激活创建的定时器；返回是否仍有任务，不撤回已发布事件 |
 | `ctx.export(api)` | 导出当前插件公开对象 |
 | `ctx.plugins.require(id).api` | 获得带激活检查的公开接口句柄 |
@@ -186,6 +186,37 @@ class Example(Plugin):
 同一订阅者、同一会话的回调顺序执行；不同订阅者与会话独立推进。过滤器和回调异常记录在 EventReceipt 中，不中断其他订阅者。入队时固定当时活跃的订阅集合，停用后的排队回调跳过，尚未激活的订阅不接收此前入队的事件。自定义事件类型失效后，基类订阅也不再收到它的排队事件。公开接口、工具和回调进入执行后持有旧代码租约，执行完释放。
 
 后台任务可在所属插件停用后完成。框架的无归属诊断订阅仍可记录 TaskCompleted/TaskFailed，但失效来源的结果不会投递到业务插件实例。需要消化历史任务结果的业务应显式设计自己的恢复机制，不能依赖重新激活后自动续接旧回执。
+
+## 定时发布事件
+
+`ctx.schedule(event_or_factory, when, *, repeat=False)` 接收事件实例或无参同步事件工厂。`when` 使用 Python 的时间类型区分时长与时刻：
+
+| `when` | `repeat=False`（默认） | `repeat=True` |
+| --- | --- | --- |
+| 秒数或 `timedelta` | 等待指定时长后发布一次 | 每隔指定时长发布一次，首次也等待该时长 |
+| `datetime.time` | 在下一次该时刻发布一次，今天已过则等到明天 | 每天该时刻发布一次 |
+| `datetime.datetime` | 在指定日期和时刻发布一次 | 从指定日期和时刻开始，每天同一时刻发布一次 |
+
+```python
+from datetime import datetime, time, timedelta
+from zoneinfo import ZoneInfo
+
+# event 是插件已注册类型的事件实例，也可以传入每次发布时创建事件的无参函数。
+ctx.schedule(event, 180)  # 三分钟后，单次
+ctx.schedule(event, timedelta(minutes=5), repeat=True)  # 每五分钟
+ctx.schedule(event, time(21, 30))  # 下一次 21:30，单次
+ctx.schedule(event, time(21, 30), repeat=True)  # 每天 21:30
+ctx.schedule(event, time(9, tzinfo=ZoneInfo("Asia/Shanghai")), repeat=True)
+ctx.schedule(event, datetime.now() + timedelta(hours=2))
+```
+
+未提供 `tzinfo` 的时刻按服务器本地时区解释；需要固定地区时区时显式传入 `ZoneInfo`。每日重复按日历计算，夏令时导致某天的时刻不存在时跳过当天，时刻重叠时每天只发布一次，可通过 `fold` 选择第一次或第二次。
+
+时长必须是有限的非负值；重复间隔必须大于零。过去或不存在的 `datetime`、字符串时间和非布尔 `repeat` 会立即报参数错误。时长从激活成功后开始计算；指定日期时间仍以传入的时刻为准。激活等待、事件队列背压或系统调度可能使实际发布延后，定时器不保证精确到时。
+
+固定间隔使用单调时钟保持节奏，不累加发布耗时；错过的间隔跳过，不连续补发。指定时刻使用系统时钟，等待期间最多每分钟重新核对一次；延误后发布当前到期事件，再寻找下一个未来时刻，不回放所有错过的日期。
+
+每次发布都会生成新的事件 ID、观测时间和激活来源；实例的其他字段保持原样，需要动态内容或发生时间时使用事件工厂。定时器等待插件激活完成才运行，所属激活失效后不再发布或重复；事件构造或发布失败会记录异常并停止该定时器。`ctx.cancel_timer(timer_id)` 可取消尚未完成的定时器，但不会撤回已入队的事件。定时器不持久化，进程重启后由插件重新安排。
 
 ## 激活与源码重载
 

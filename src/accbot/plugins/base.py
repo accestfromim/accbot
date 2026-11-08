@@ -1,9 +1,11 @@
 import functools
 import inspect
+from collections.abc import Callable
+from datetime import datetime, time, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from ..events import EventOrigin
+from ..events import Event, EventOrigin
 from ..lifecycle import Activation
 
 if TYPE_CHECKING:
@@ -57,8 +59,15 @@ class PluginContext:
         )
         return await self.runtime.events.publish(event, source=self.owner)
 
-    def schedule(self, event, *, delay, interval=None):
-        return self.runtime.timers.schedule(self.owner, event, delay=delay, interval=interval)
+    def schedule(
+        self,
+        event: Event | Callable[[], Event],
+        when: float | timedelta | time | datetime,
+        *,
+        repeat: bool = False,
+    ) -> str:
+        """Publish after a duration or at a clock time; optionally repeat at that interval or daily."""
+        return self.runtime.timers.schedule(self.owner, event, when, repeat=repeat)
 
     def cancel_timer(self, timer_id):
         return self.runtime.timers.cancel(timer_id, owner=self.owner)

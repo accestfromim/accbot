@@ -51,7 +51,7 @@ class Plugin(BasePlugin):
             channel.idle_ticket = uuid4().hex
             channel.idle_timer = self.ctx.schedule(
                 SummarizeMemory(memory_key=channel.store.key, ticket=channel.idle_ticket),
-                delay=self.config.idle_seconds,
+                when=self.config.idle_seconds,
             )
 
     @on_message(sender=lambda plugin: plugin.config.owner, private=True, include_self=False)
@@ -63,7 +63,7 @@ class Plugin(BasePlugin):
             channel.idle_ticket = uuid4().hex
             channel.idle_timer = self.ctx.schedule(
                 SummarizeMemory(memory_key=channel.store.key, ticket=channel.idle_ticket),
-                delay=self.config.idle_seconds,
+                when=self.config.idle_seconds,
             )
 
     @on_message(

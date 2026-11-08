@@ -180,7 +180,7 @@ def test_retired_timer_cannot_fire_at_new_activation(runtime, write_plugin):
         "timer",
         """from accbot import Plugin as Base, Event
 class Plugin(Base):
-    async def on_activate(self): self.ctx.schedule(Event(), delay=.03)
+    async def on_activate(self): self.ctx.schedule(Event(), when=.03)
 """,
     )
 
@@ -226,7 +226,7 @@ def test_staged_timers_wait_until_activation_commits(runtime, write_plugin):
 from accbot import Plugin as Base, Event
 class Plugin(Base):
     async def on_activate(self):
-        self.ctx.schedule(Event(), delay=0)
+        self.ctx.schedule(Event(), when=0)
         await asyncio.sleep(.01)
 """,
     )

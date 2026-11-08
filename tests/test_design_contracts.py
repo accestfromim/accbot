@@ -152,7 +152,7 @@ def test_timer_cancellation_is_owned_and_cleans_up_before_task_starts():
         other.activate()
         seen = []
         bus.subscribe(Event, seen.append)
-        timer = timers.schedule(owner, Event(), delay=0)
+        timer = timers.schedule(owner, Event(), when=0)
         with pytest.raises(FrameworkError):
             timers.cancel(timer, owner=other)
         assert timers.cancel(timer, owner=owner)
