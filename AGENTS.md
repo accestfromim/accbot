@@ -21,6 +21,6 @@ Read `docs/design.md` before changing framework contracts. Keep its checklist an
 - Local UI access needs no token. Model and OneBot wizards manage secret references automatically; saved OneBot configurations remain inactive until explicitly enabled.
 - Use `[机器人名称]` for example bot names. Runtime account identity comes from the adapter connection.
 - Tests must run offline without model credentials or a QQ account. Do not commit local evaluation outputs, screenshots, caches or build artifacts.
-- Do not add a license without an explicit maintainer choice.
+- The project is MIT-licensed. Preserve LICENSE and applicable copyright notices.
 
 Validation: `python3 -m pytest`, `ruff check .`, `ruff format --check .`.
