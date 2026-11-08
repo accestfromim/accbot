@@ -181,7 +181,7 @@ def test_concurrent_profile_updates_return_latest_content_instead_of_overwriting
     async def run():
         runtime, plugin, _ = await setup_ai()
         try:
-            context = ToolContext(metadata={"profile_users": (user(200),)})
+            context = module(plugin, "context").MemoryContext(profile_users=(user(200),))
             results = await asyncio.gather(
                 runtime.tools.execute(update(200, "来自群 A"), context),
                 runtime.tools.execute(update(200, "来自群 B"), context),

@@ -1,4 +1,5 @@
 import asyncio
+from typing import Annotated
 
 import httpx
 import pytest
@@ -9,6 +10,7 @@ from accbot.lifecycle import Activation
 from accbot.messages import AssetReader
 from accbot.plugins.base import PluginContext
 from accbot.tools import JobManager, ToolRegistry
+from accbot.web import create_app
 
 
 def test_validation_context_injection_failure_and_timeout():
@@ -87,14 +89,23 @@ def test_stop_jobs_only_stops_selected_jobs_owned_by_the_context(runtime, tmp_pa
         foreign = runtime.jobs.submit(other, release.wait)
         try:
             await context.stop_jobs([selected, foreign, "missing"])
-            assert runtime.jobs.history[selected]["status"] == "cancelled"
+            assert runtime.jobs.history[selected].status == "cancelled"
             assert set(runtime.jobs.tasks) == {remaining, foreign}
             release.set()
             await context.stop_jobs([remaining], timeout=1)
             await runtime.jobs.drain()
-            assert runtime.jobs.history[remaining]["status"] == "completed"
-            assert runtime.jobs.history[foreign]["status"] == "completed"
+            assert runtime.jobs.history[remaining].status == "completed"
+            assert runtime.jobs.history[foreign].status == "completed"
             assert owner.inflight == other.inflight == 0
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=create_app(runtime)), base_url="http://test"
+            ) as client:
+                jobs = (await client.get("/api/status")).json()["jobs"]
+            assert {job["id"]: job["status"] for job in jobs} == {
+                selected: "cancelled",
+                remaining: "completed",
+                foreign: "completed",
+            }
         finally:
             release.set()
             owner.retire()
@@ -116,8 +127,75 @@ def test_job_cancelled_before_start_releases_its_registration_lease():
         job_id = jobs.submit(owner, never_started)
         await jobs.close()
         assert not jobs.tasks and owner.inflight == 0
-        assert jobs.history[job_id]["status"] == "cancelled"
+        assert jobs.history[job_id].status == "cancelled"
         owner.retire()
         await bus.close()
+
+    asyncio.run(run())
+
+
+def test_job_result_is_preserved_when_notification_fails(monkeypatch):
+    async def run():
+        bus, owner = EventBus(), Activation("job")
+        jobs = JobManager(bus)
+        notifications = []
+
+        async def unavailable(event, **kwargs):
+            notifications.append(event)
+            raise RuntimeError("notification failed")
+
+        async def complete():
+            return "done"
+
+        monkeypatch.setattr(bus, "publish", unavailable)
+        owner.activate()
+        task_id = jobs.submit(owner, complete)
+        await jobs.drain()
+        assert jobs.history[task_id].status == "completed"
+        assert len(notifications) == 1 and notifications[0].result == "done"
+        assert not jobs.tasks and owner.inflight == 0
+        owner.retire()
+        await bus.close()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("background", [False, True])
+def test_typed_tool_context_is_injected_without_becoming_a_model_argument(background):
+    class Context(ToolContext):
+        requester: str
+
+    async def run():
+        bus = EventBus()
+        jobs, owner = JobManager(bus), Activation("typed")
+        registry = ToolRegistry(jobs)
+        context = Context(requester="trusted caller")
+        calls = []
+
+        @Tool(background=background)
+        async def inspect_context(value: int, ctx: Annotated[Context, "injected"]):
+            assert ctx is context
+            calls.append(ctx.requester)
+            return value
+
+        definition = registry.register(owner, inspect_context)
+        owner.activate()
+        try:
+            assert set(definition.parameters["properties"]) == {"value"}
+            call = ToolCall(name=definition.id, arguments={"value": 1})
+            for invalid in (None, ToolContext(metadata={"requester": "forged caller"})):
+                result = await registry.execute(call, invalid)
+                assert not result.ok and result.error.code == "invalid_argument"
+            forged = call.model_copy(update={"arguments": {"value": 1, "ctx": {"requester": "forged"}}})
+            assert not (await registry.execute(forged, context)).ok
+            assert not calls
+            result = await registry.execute(call, context)
+            assert result.ok and result.accepted == background
+            await jobs.drain()
+            assert calls == ["trusted caller"]
+        finally:
+            owner.retire()
+            await jobs.close()
+            await bus.close()
 
     asyncio.run(run())

@@ -10,7 +10,9 @@ from typing import Annotated, Literal
 
 from pydantic import Field
 
-from accbot import Tool, ToolContext
+from accbot import Tool
+
+from .context import ChatContext
 
 
 class OwnerTools:
@@ -21,7 +23,7 @@ class OwnerTools:
     def read_file(
         self,
         path: str,
-        ctx: ToolContext,
+        ctx: ChatContext,
         offset: Annotated[int, Field(ge=0)] = 0,
         max_bytes: Annotated[int, Field(ge=1, le=65536)] = 32768,
         encoding: Literal["utf-8", "base64"] = "utf-8",
@@ -56,7 +58,7 @@ class OwnerTools:
         self,
         path: str,
         content: str,
-        ctx: ToolContext,
+        ctx: ChatContext,
         mode: Literal["overwrite", "append"] = "overwrite",
         encoding: Literal["utf-8", "base64"] = "utf-8",
         create_parent_directories: bool = False,
@@ -79,7 +81,7 @@ class OwnerTools:
     async def execute_shell(
         self,
         command: Annotated[str, Field(min_length=1, max_length=16384)],
-        ctx: ToolContext,
+        ctx: ChatContext,
         working_directory: str = "",
         timeout_seconds: Annotated[int, Field(ge=1, le=300)] = 30,
     ):

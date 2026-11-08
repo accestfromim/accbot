@@ -4,8 +4,21 @@ import json
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
-from accbot import AssetRef, ChatMessage, ModelItem, ModelPart, ModelQuote, User
+from pydantic import Field
+
+from accbot import AssetRef, ChatMessage, ModelItem, ModelPart, ModelQuote, ToolContext, User, UserRef
 from accbot.models import render_items
+
+
+class ChatContext(ToolContext):
+    message: ChatMessage
+    bot: UserRef | None = None
+    owner: bool = False
+    images: dict[str, tuple[AssetRef, ...]] = Field(default_factory=dict)
+
+
+class MemoryContext(ToolContext):
+    profile_users: tuple[UserRef, ...] = ()
 
 
 @dataclass

@@ -8,11 +8,12 @@ import logging
 import re
 from collections import OrderedDict
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Annotated, Any, Literal, get_args, get_origin, get_type_hints
 
 from pydantic import Field, ValidationError, create_model
 
-from .errors import ErrorCode, ErrorInfo, FrameworkError, Outcome, error_info
+from .errors import ErrorCode, ErrorInfo, FrameworkError, error_info
 from .events import EventBus, EventOrigin, TaskCompleted, TaskFailed
 from .lifecycle import Activation
 from .types import ConversationRef, FrozenModel, new_id, thaw
@@ -75,15 +76,24 @@ class ToolContext(FrozenModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class _ToolOptions:
+    name: str
+    description: str
+    timeout: float
+    background: bool
+    prompt_file: str | None
+
+
 def Tool(func=None, *, name=None, description=None, timeout=60.0, background=False, prompt_file=None):
     def decorate(target):
-        target.__accbot_tool__ = {
-            "name": name or target.__name__,
-            "description": description or inspect.getdoc(target) or "",
-            "timeout": timeout,
-            "background": background,
-            "prompt_file": prompt_file,
-        }
+        target.__accbot_tool__ = _ToolOptions(
+            name=name or target.__name__,
+            description=description or inspect.getdoc(target) or "",
+            timeout=timeout,
+            background=background,
+            prompt_file=prompt_file,
+        )
         return target
 
     return decorate(func) if func else decorate
@@ -93,31 +103,45 @@ def async_tool(func=None, **kwargs):
     return Tool(func, background=True, **kwargs)
 
 
+@dataclass
+class JobInfo:
+    id: str
+    owner: str
+    activation_id: str
+    status: Literal["running", "completed", "failed", "cancelled"] = "running"
+
+
 class JobManager:
     def __init__(self, events: EventBus, history_limit: int = 1000):
         self.events = events
         self.tasks: dict[str, asyncio.Task] = {}
-        self.history: OrderedDict[str, dict] = OrderedDict()
+        self.history: OrderedDict[str, JobInfo] = OrderedDict()
         self.history_limit = history_limit
 
     def submit(self, owner: Activation, operation: Callable, *, correlation_id=None) -> str:
         accepted_active = owner.active
         owner.acquire(allow_staging=True)
         task_id = new_id()
-        self.history[task_id] = {
-            "id": task_id,
-            "owner": owner.plugin_id,
-            "activation_id": owner.id,
-            "status": "running",
-        }
+        info = self.history[task_id] = JobInfo(task_id, owner.plugin_id, owner.id)
 
         async def run():
+            await owner.ready.wait()
+            if not accepted_active and owner.retired:
+                raise asyncio.CancelledError
             try:
-                await owner.ready.wait()
-                if not accepted_active and owner.retired:
-                    raise asyncio.CancelledError
                 result = await operation()
-                self.history[task_id]["status"] = "completed"
+            except Exception as exc:
+                info.status = "failed"
+                event = TaskFailed(
+                    task_id=task_id,
+                    owner_plugin_id=owner.plugin_id,
+                    activation_id=owner.id,
+                    error=error_info(exc, task_id),
+                    correlation_id=correlation_id,
+                    origin=EventOrigin(component=owner.plugin_id, activation_id=owner.id),
+                )
+            else:
+                info.status = "completed"
                 event = TaskCompleted(
                     task_id=task_id,
                     owner_plugin_id=owner.plugin_id,
@@ -126,31 +150,15 @@ class JobManager:
                     correlation_id=correlation_id,
                     origin=EventOrigin(component=owner.plugin_id, activation_id=owner.id),
                 )
-                try:
-                    await self.events.publish(event, source=owner)
-                except FrameworkError:
-                    log.warning("background result has no available event destination: %s", task_id)
-            except Exception as exc:
-                self.history[task_id]["status"] = "failed"
-                try:
-                    await self.events.publish(
-                        TaskFailed(
-                            task_id=task_id,
-                            owner_plugin_id=owner.plugin_id,
-                            activation_id=owner.id,
-                            error=error_info(exc, task_id),
-                            correlation_id=correlation_id,
-                            origin=EventOrigin(component=owner.plugin_id, activation_id=owner.id),
-                        ),
-                        source=owner,
-                    )
-                except Exception:
-                    log.exception("could not publish background task failure: %s", task_id)
+            try:
+                await self.events.publish(event, source=owner)
+            except Exception:
+                log.exception("could not publish background task result: %s", task_id)
 
         def finished(task):
             # A task can be cancelled before its coroutine enters any try/finally.
             if task.cancelled():
-                self.history[task_id]["status"] = "cancelled"
+                info.status = "cancelled"
             owner.release()
             self.tasks.pop(task_id, None)
             for key in tuple(self.history):
@@ -170,7 +178,7 @@ class JobManager:
         tasks = [
             task
             for key, task in self.tasks.items()
-            if key in selected and self.history[key]["activation_id"] == owner.id
+            if key in selected and self.history[key].activation_id == owner.id
         ]
         if tasks:
             _, pending = await asyncio.wait(tasks, timeout=timeout)
@@ -190,8 +198,8 @@ class JobManager:
 
 
 class _ToolEntry:
-    def __init__(self, owner, func, options, system_prompt=""):
-        self.owner, self.func, self.timeout = owner, func, options["timeout"]
+    def __init__(self, owner, func, options: _ToolOptions, system_prompt=""):
+        self.owner, self.func, self.timeout = owner, func, options.timeout
         signature = inspect.signature(func)
         hints = get_type_hints(func, include_extras=True)
         fields, self.context_parameter = {}, None
@@ -200,19 +208,20 @@ class _ToolEntry:
                 raise FrameworkError(ErrorCode.CONFIGURATION, "tools require named parameters")
             annotation = hints.get(name, Any)
             parameter_type = get_args(annotation)[0] if get_origin(annotation) is Annotated else annotation
-            if parameter_type is ToolContext:
+            if isinstance(parameter_type, type) and issubclass(parameter_type, ToolContext):
                 if self.context_parameter is not None:
                     raise FrameworkError(ErrorCode.CONFIGURATION, "a tool can declare only one ToolContext")
                 self.context_parameter = name
+                self.context_type = parameter_type
                 continue
             fields[name] = (annotation, ... if param.default is inspect.Parameter.empty else param.default)
         self.arguments = create_model(f"ToolArguments_{new_id()}", __config__={"extra": "forbid"}, **fields)
         self.definition = ToolDefinition(
-            id=f"{owner.plugin_id}.{options['name']}",
-            name=options["name"],
-            description=options["description"],
+            id=f"{owner.plugin_id}.{options.name}",
+            name=options.name,
+            description=options.description,
             parameters=self.arguments.model_json_schema(),
-            background=options["background"],
+            background=options.background,
             system_prompt=system_prompt,
             activation_id=owner.id,
         )
@@ -246,7 +255,7 @@ class ToolRegistry:
         if options is None:
             raise FrameworkError(ErrorCode.CONFIGURATION, "tool requires @Tool or @async_tool")
         content = ""
-        filename = options.get("prompt_file")
+        filename = options.prompt_file
         if filename is not None:
             if prompt_bundle is None:
                 raise FrameworkError(
@@ -275,16 +284,15 @@ class ToolRegistry:
     async def execute(self, call: ToolCall, context: ToolContext | None = None) -> ToolResult:
         entry = self._entries.get(call.name)
         if entry is None or not entry.owner.active:
-            return ToolResult(
-                call_id=call.id,
-                ok=False,
-                error=ErrorInfo(code=ErrorCode.NOT_FOUND, message=f"tool not found: {call.name}"),
-            )
+            return ToolResult.failure(call.id, f"tool not found: {call.name}", code=ErrorCode.NOT_FOUND)
         try:
             validated = entry.arguments.model_validate(dict(call.arguments), strict=True)
             args = {name: getattr(validated, name) for name in type(validated).model_fields}
             if entry.context_parameter:
-                args[entry.context_parameter] = context or ToolContext()
+                context = context or ToolContext()
+                if not isinstance(context, entry.context_type):
+                    return ToolResult.failure(call.id, "tool context does not match the required type")
+                args[entry.context_parameter] = context
             if entry.definition.background:
                 task_id = self.jobs.submit(
                     entry.owner,
@@ -299,20 +307,6 @@ class ToolRegistry:
             finally:
                 entry.owner.release()
         except ValidationError:
-            return ToolResult(
-                call_id=call.id,
-                ok=False,
-                error=ErrorInfo(
-                    code=ErrorCode.INVALID_ARGUMENT, message="tool arguments do not match schema"
-                ),
-            )
-        except TimeoutError:
-            return ToolResult(
-                call_id=call.id,
-                ok=False,
-                error=ErrorInfo(
-                    code=ErrorCode.TIMEOUT, message="tool execution timed out", outcome=Outcome.UNKNOWN
-                ),
-            )
+            return ToolResult.failure(call.id, "tool arguments do not match schema")
         except Exception as exc:
             return ToolResult(call_id=call.id, ok=False, error=error_info(exc, call.id))

@@ -1,10 +1,11 @@
 from uuid import uuid4
 
-from accbot import MessageReceived, Tool, ToolContext, ToolDefinition, on_event, on_message
+from accbot import MessageReceived, Tool, ToolDefinition, on_event, on_message
 from accbot import Plugin as BasePlugin
 from accbot.events import MessageSent
 
 from .agent import Agent
+from .context import ChatContext, MemoryContext
 from .events import SummarizeMemory
 from .identity import MemoryKey
 from .owner_tools import OwnerTools
@@ -126,12 +127,11 @@ class Plugin(BasePlugin):
         rule = self.group_rule(message.conversation)
         return rule is None or not rule.mention_users or message.sender.ref.id in rule.mention_users
 
-    def authorize_owner(self, context):
-        message = context.metadata.get("message")
+    def authorize_owner(self, context: ChatContext):
+        message = context.message
         if (
             not self.ctx.owner.active
             or not self.config.owner_controls
-            or message is None
             or context.conversation != message.conversation
             or not self.is_owner(message)
         ):
@@ -151,13 +151,9 @@ class Plugin(BasePlugin):
         return tuple(t for t in self.ctx.tools.list() if t.id == "ai.chat.update_user_profile")
 
     @Tool(prompt_file="update_user_profile.md")
-    async def update_user_profile(self, user_id: str, content: str, ctx: ToolContext, revision: str = ""):
+    async def update_user_profile(self, user_id: str, content: str, ctx: MemoryContext, revision: str = ""):
         """记忆整理时创建或完整更新上下文中某个用户的 Markdown 画像；revision 使用读取到的版本，新建留空。"""
-        users = {
-            MemoryKey.of_user(user): user
-            for user in ctx.metadata.get("profile_users", ())
-            if user.id == user_id
-        }
+        users = {MemoryKey.of_user(user): user for user in ctx.profile_users if user.id == user_id}
         if not self.ctx.owner.active or len(users) != 1:
             raise ValueError("仅能在记忆整理阶段更新本次上下文中身份明确的用户画像")
         return self.agent.profiles.update(next(iter(users.values())), content, revision)
@@ -168,11 +164,11 @@ class Plugin(BasePlugin):
         return {"silent": True}
 
     @Tool(prompt_file="view_message_images.md")
-    async def view_message_images(self, message_id: str, ctx: ToolContext):
+    async def view_message_images(self, message_id: str, ctx: ChatContext):
         """按消息 ID 查看唤醒时最近 15 条群消息中的图片，仅本轮使用。"""
         if ctx.conversation is None or ctx.conversation.kind != "group":
             raise ValueError("只支持群消息图片窗口")
-        assets = ctx.metadata.get("images", {}).get(message_id)
+        assets = ctx.images.get(message_id)
         if not assets:
             raise ValueError("消息不在当前图片窗口中，或没有图片")
         images = await self.network.images(assets)

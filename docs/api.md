@@ -38,11 +38,15 @@
 | `PluginSettings.read()` / `write(values)` | 插件配置页面的读写接口，在 settings.py 中实现 |
 | `Plugin.on_settings_changed(values)` | 配置保存成功后通知活跃业务实例 |
 
-`@Tool` 根据函数类型注解生成参数 Schema，保留 `Annotated[T, Field(...)]` 的范围、长度等约束，执行时用相同模型严格校验；注解为 `ToolContext` 的单个参数由执行器注入，不出现在模型参数中。Pydantic 参数类会以该类的实例交给工具函数。工具 ID 为 `plugin_id.local_name`；工具声明生成稳定、无冲突的合法 wire name，模型协议层将返回调用映射回工具 ID。
+`@Tool` 根据函数类型注解生成参数 Schema，保留 `Annotated[T, Field(...)]` 的范围、长度等约束，执行时用相同模型严格校验；注解为 `ToolContext` 或其子类的单个参数由执行器注入，不出现在模型参数中。Pydantic 参数类会以该类的实例交给工具函数。工具 ID 为 `plugin_id.local_name`；工具声明生成稳定、无冲突的合法 wire name，模型协议层将返回调用映射回工具 ID。
+
+固定结构的业务上下文应由插件定义 `ToolContext` 子类，例如官方聊天插件的 `ChatContext(message, bot, owner, images)` 和 `MemoryContext(profile_users)`。调用 `execute(call, context)` 时传入相应实例；执行器检查类型并原样注入，缺失或类型不匹配时返回参数错误，不从模型参数中补建上下文。通用 `metadata` 仍可用于开放扩展，不替代已知字段的声明。
 
 `@async_tool` 和普通异步函数不同：它表示接受后台作业。执行返回 accepted 与 task_id，最终由 TaskCompleted 或 TaskFailed 报告结果。停用不取消这些作业，回执不自动交给新插件实例。
 
 `stop_jobs` 是插件显式管理自身任务的接口，不由卸载操作自动调用。官方聊天插件用它停止保存了 ID 的会话工作任务，不扫描任务表，也不停止工具执行器接受的其他后台任务。
+
+后台任务状态使用 `JobInfo` 记录，管理 API 将其序列化为含 `id`、`owner`、`activation_id`、`status` 的 JSON 对象。结果事件通知失败不改写任务的执行状态。
 
 两个工具装饰器都接受 `prompt_file="name.md"`，从所属插件的 `prompts/tools/name.md` 读取补充提示词。`ToolDefinition.system_prompt` 保存激活时正文快照，`activation_id` 标记所属激活；二者不进入供应商工具 Schema。`prompts/system.md` 自动注册为插件补充；详细规则见 [系统提示词](system-prompts.md)。
 

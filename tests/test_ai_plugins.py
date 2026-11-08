@@ -593,7 +593,11 @@ def test_failed_memory_retry_recovery_and_commit_marker(setup_ai):
             # Simulate a crash between the atomic memory commit and journal cleanup.
             memory_module = importlib.import_module(plugin.__module__.rsplit(".", 1)[0] + ".memory")
             record = memory_module.Record(
-                "already-committed", "test", False, [[ModelItem.text("user", "x")]], True
+                id="already-committed",
+                model="test",
+                owner=False,
+                turns=[[ModelItem.text("user", "x")]],
+                sealed=True,
             )
             channel.store.save(channel.store.load(), record.id)
             channel.records.append(record)
@@ -604,6 +608,39 @@ def test_failed_memory_retry_recovery_and_commit_marker(setup_ai):
             channel.store.memory_path.write_text("invalid", encoding="utf-8")
             with pytest.raises(ValueError):
                 channel.store.load()
+        finally:
+            await runtime.close()
+
+    asyncio.run(run())
+
+
+def test_pending_memory_roundtrip_preserves_typed_turns_and_rejects_bad_fields(setup_ai, tmp_path):
+    async def run():
+        runtime, plugin, _ = await setup_ai()
+        memory = importlib.import_module(plugin.__module__.rsplit(".", 1)[0] + ".memory")
+        store = memory.Store(tmp_path / "record-roundtrip", event().message.conversation)
+        first, waiting = ModelItem.text("user", "已接收"), ModelItem.text("user", "尚未处理")
+        call = ModelItem(role="assistant", calls=(ToolCall(id="unfinished", name="example.action"),))
+        record = memory.Record(
+            id="record", model="test", owner=False, turns=[[first, call]], waiting=[waiting]
+        )
+        try:
+            store.journal([record])
+            saved = store.pending_path.read_text("utf-8")
+            restored = store.recover()[0]
+            assert restored.id == record.id and restored.sealed and not restored.waiting
+            assert restored.turns[0][:2] == [first, call]
+            assert restored.turns[0][2].call_id == "unfinished" and not restored.turns[0][2].output["ok"]
+            assert restored.turns[1] == [waiting]
+            assert store.pending_path.read_text("utf-8") == saved
+            for invalid in ({"owner": "false"}, {"turns": [["not a ModelItem"]]}):
+                data = json.loads(saved)
+                data["records"][0].update(invalid)
+                malformed = json.dumps(data, ensure_ascii=False)
+                store.pending_path.write_text(malformed, encoding="utf-8")
+                with pytest.raises(ValueError):
+                    store.recover()
+                assert store.pending_path.read_text("utf-8") == malformed
         finally:
             await runtime.close()
 
@@ -625,8 +662,9 @@ def test_owner_identity_controls_and_stateless_private(setup_ai, tmp_path):
             assert owner_names == {t.name for t in runtime.tools.list()}
             assert "execute_shell" not in {t.name for t in plugin.tool_list()}
             target = tmp_path / "owner.txt"
-            context = ToolContext(
-                conversation=owner_event.message.conversation, metadata={"message": owner_event.message}
+            context_module = importlib.import_module(plugin.__module__.rsplit(".", 1)[0] + ".context")
+            context = context_module.ChatContext(
+                conversation=owner_event.message.conversation, message=owner_event.message
             )
             result = await runtime.tools.execute(
                 ToolCall(name="ai.chat.write_file", arguments={"path": str(target), "content": "猫abc"}),
@@ -644,7 +682,7 @@ def test_owner_identity_controls_and_stateless_private(setup_ai, tmp_path):
             forged = event(user="700", direct=False)
             result = await runtime.tools.execute(
                 ToolCall(name="ai.chat.read_file", arguments={"path": str(target)}),
-                ToolContext(conversation=forged.message.conversation, metadata={"message": forged.message}),
+                context_module.ChatContext(conversation=forged.message.conversation, message=forged.message),
             )
             assert not result.ok
             previous = len(model.requests)

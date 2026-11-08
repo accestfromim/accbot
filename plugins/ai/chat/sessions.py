@@ -10,11 +10,10 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from uuid import uuid4
 
-from accbot import ConversationRef, MessageChain, MessageReceived, ToolContext
+from accbot import ConversationRef, MessageChain, MessageReceived
 from accbot.events import MessageSent
 
-from .agent import tool_cost
-from .context import Entry
+from .context import ChatContext, Entry, MemoryContext
 from .events import SummarizeMemory
 from .identity import MemoryKey
 from .memory import Record, Store, empty_memory
@@ -106,18 +105,7 @@ class Sessions:
             channel.worker_id = None
 
     def visible_ids(self, record):
-        items = [item for turn in record.turns for item in turn]
-        # Keep compatibility with pending histories written before structured message metadata.
-        legacy = {
-            line.removeprefix("消息id: ")
-            for item in items
-            if item.message_id is None
-            for part in item.content
-            if part.text
-            for line in part.text.splitlines()
-            if line.startswith("消息id: ")
-        }
-        return legacy | {item.message_id for item in items if item.message_id is not None}
+        return {item.message_id for turn in record.turns for item in turn if item.message_id is not None}
 
     async def accept(self, event: MessageReceived, *, tools):
         message = event.message
@@ -184,7 +172,7 @@ class Sessions:
             log.warning("AI queue full: %s", message.conversation.key)
             return
         if channel.session is None:
-            record = Record(uuid4().hex, self.config.default_model, owner)
+            record = Record(id=uuid4().hex, model=self.config.default_model, owner=owner)
             record.waiting = [e.render(channel.known, set()) for e in ([entry] if direct else channel.recent)]
             channel.session = Session(record, now)
             if not (direct and not owner):
@@ -195,10 +183,13 @@ class Sessions:
         session.record.waiting = []
         session.record.turns.append(trace)
         snapshot = {e.id: e.images for e in channel.recent if e.images}
-        context = ToolContext(
+        context = ChatContext(
             conversation=message.conversation,
             correlation_id=event.event_id,
-            metadata={"message": message, "owner": owner, "images": snapshot, "bot": event.connection.bot},
+            message=message,
+            owner=owner,
+            images=snapshot,
+            bot=event.connection.bot,
         )
         persistent = not (direct and not owner)
         channel.store.journal(channel.records)
@@ -224,10 +215,7 @@ class Sessions:
                     log.debug("quoted message unavailable: %s", ref.id, exc_info=True)
             # Include one level of quote detail even if earlier history has since been trimmed.
             for i, item in enumerate(trace):
-                if item.message_id == entry.id or (
-                    item.message_id is None
-                    and any(part.text and f"消息id: {entry.id}\n" in part.text for part in item.content)
-                ):
+                if item.message_id == entry.id:
                     trace[i] = entry.render(channel.known, set())
         index = next(i for i, turn in enumerate(record.turns) if turn is trace)
 
@@ -266,17 +254,15 @@ class Sessions:
                 selected = self.agent.context(
                     memory,
                     record.owner,
-                    context.metadata.get("bot"),
+                    context.bot,
                     record.turns[:index],
                     trace,
-                    self.config.context_budget
-                    - self.config.output_reserve
-                    - self.agent.prompt_cost(
+                    self.agent.budget(
+                        self.config,
                         self.config.owner_prompt_id if record.owner else self.config.chat_prompt_id,
                         self.config.persona_id,
                         tools,
-                    )
-                    - tool_cost(tools),
+                    ),
                 )
                 del record.turns[: selected.first_turn]
                 checkpoint()
@@ -308,7 +294,7 @@ class Sessions:
                         channel.store.load(),
                         self.plugin.memory_tools(),
                         self.config,
-                        ToolContext(conversation=channel.conversation, correlation_id=record.id),
+                        MemoryContext(conversation=channel.conversation, correlation_id=record.id),
                         lambda: not self.closed and self.ctx.owner.active,
                     )
                     channel.store.save(memory, record.id)

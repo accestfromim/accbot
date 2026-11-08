@@ -3,9 +3,9 @@ import json
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from accbot import AssetRef, ModelItem, ModelPart, ToolCall, ToolContext, ToolDefinition, ToolResult, UserRef
+from accbot import AssetRef, ModelItem, ModelPart, ToolCall, ToolDefinition, ToolResult, UserRef
 
-from .context import close_tool_calls, cost, window
+from .context import ChatContext, MemoryContext, close_tool_calls, cost, window
 from .profiles import Profiles, participants
 
 
@@ -50,9 +50,14 @@ class Agent:
             budget,
         )
 
-    def prompt_cost(self, prompt_id, persona_id, tools):
+    def budget(self, config, prompt_id, persona_id, tools):
         text = self.ctx.prompts.render(prompt_id, persona_id=persona_id, tools=tools)
-        return cost([ModelItem.text("system", text)])
+        return (
+            config.context_budget
+            - config.output_reserve
+            - tool_cost(tools)
+            - cost([ModelItem.text("system", text)])
+        )
 
     async def run(
         self,
@@ -61,7 +66,7 @@ class Agent:
         history: Sequence[Sequence[ModelItem]],
         trace: list[ModelItem],
         tools: Sequence[ToolDefinition],
-        context: ToolContext,
+        context: ChatContext,
         config,
         checkpoint: Callable[[], None],
         running: Callable[[], bool],
@@ -69,7 +74,7 @@ class Agent:
         allowed = {t.id for t in tools}
         ephemeral = []
         model = self.ctx.models.get(model_id)
-        owner = context.metadata.get("owner", False)
+        owner = context.owner
         prompt_id = config.owner_prompt_id if owner else config.chat_prompt_id
         profile_cache = {}
         try:
@@ -79,13 +84,10 @@ class Agent:
                 selected = self.context(
                     memory,
                     owner,
-                    context.metadata.get("bot"),
+                    context.bot,
                     history,
                     trace + ephemeral,
-                    config.context_budget
-                    - config.output_reserve
-                    - tool_cost(tools)
-                    - self.prompt_cost(prompt_id, config.persona_id, tools),
+                    self.budget(config, prompt_id, config.persona_id, tools),
                     profile_cache=profile_cache,
                 )
                 result = await model.generate(
@@ -139,7 +141,7 @@ class Agent:
             trace[:] = close_tool_calls(trace)
             checkpoint()
 
-    async def summarize(self, record, memory, tools, config, context, running):
+    async def summarize(self, record, memory, tools, config, context: MemoryContext, running):
         from .memory import Memory
 
         model = self.ctx.models.get(record.model)
@@ -162,16 +164,13 @@ class Agent:
                 None,
                 record.turns,
                 trace,
-                config.context_budget
-                - config.output_reserve
-                - tool_cost(tools)
-                - self.prompt_cost(config.memory_prompt_id, None, tools),
+                self.budget(config, config.memory_prompt_id, None, tools),
                 profile_cache=profile_cache,
             )
             if record.turns and selected.first_turn == len(record.turns):
                 raise ValueError("记忆整理预算不足，无法保留任何会话轮次")
             tool_context = context.model_copy(
-                update={"metadata": {"profile_users": tuple(participants(selected.items).values())}}
+                update={"profile_users": tuple(participants(selected.items).values())}
             )
             result = await model.generate(
                 selected.items, tools=tools, system_prompt_id=config.memory_prompt_id, **options

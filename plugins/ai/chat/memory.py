@@ -1,5 +1,4 @@
 import json
-from dataclasses import dataclass, field
 from typing import Literal
 from uuid import uuid4
 
@@ -47,24 +46,14 @@ def empty_memory():
     return Memory(version=1, summary="", members=[], facts=[], open_tasks=[])
 
 
-@dataclass
-class Record:
+class Record(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
     id: str
     model: str
     owner: bool
-    turns: list[list[ModelItem]] = field(default_factory=list)
+    turns: list[list[ModelItem]] = Field(default_factory=list)
     sealed: bool = False
-    waiting: list[ModelItem] = field(default_factory=list)
-
-    def dump(self):
-        return {
-            "id": self.id,
-            "model": self.model,
-            "owner": self.owner,
-            "sealed": self.sealed,
-            "turns": [[i.model_dump(mode="json") for i in turn] for turn in self.turns],
-            "waiting": [i.model_dump(mode="json") for i in self.waiting],
-        }
+    waiting: list[ModelItem] = Field(default_factory=list)
 
 
 class Store:
@@ -167,7 +156,7 @@ class Store:
             self.pending_path,
             {
                 **self.identity(),
-                "records": [r.dump() for r in records],
+                "records": [r.model_dump(mode="json") for r in records],
             },
         )
 
@@ -176,16 +165,11 @@ class Store:
             return []
         value = json.loads(self.pending_path.read_text("utf-8"))
         self._verify(value)
-        records = []
-        for r in value["records"]:
-            if (
-                not isinstance(r["id"], str)
-                or not isinstance(r["model"], str)
-                or type(r["owner"]) is not bool
-            ):
-                raise ValueError("待整理记录的身份或模型字段无效")
-            turns = [close_tool_calls([ModelItem.model_validate(i) for i in turn]) for turn in r["turns"]]
-            if r.get("waiting"):
-                turns.append([ModelItem.model_validate(i) for i in r["waiting"]])
-            records.append(Record(r["id"], r["model"], r["owner"], turns, sealed=True))
+        records = [Record.model_validate(r) for r in value["records"]]
+        for record in records:
+            record.turns = [close_tool_calls(turn) for turn in record.turns]
+            if record.waiting:
+                record.turns.append(record.waiting)
+                record.waiting = []
+            record.sealed = True
         return records
