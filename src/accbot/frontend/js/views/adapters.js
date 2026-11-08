@@ -143,8 +143,8 @@ function onebotWizard(existing) {
       name: existing?.name || "",
       self_id: existing?.self_id || "",
       mode: existing?.mode || "reverse_ws",
-      http_url: existing?.http_url || "",
-      ws_url: existing?.ws_url || "",
+      http_url: existing?.http_url || "http://127.0.0.1:3000",
+      ws_url: existing?.ws_url || "ws://127.0.0.1:3001",
       token: "",
       scope: existing?.scope || "",
     };
