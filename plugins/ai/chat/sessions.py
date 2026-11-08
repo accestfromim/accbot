@@ -10,8 +10,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from uuid import uuid4
 
-from accbot import ConversationRef, MessageChain, MessageReceived
-from accbot.events import MessageSent
+from accbot import ConversationRef, MessageChain, MessageReceived, ModelItem
 
 from .context import ChatContext, Entry, MemoryContext
 from .events import SummarizeMemory
@@ -34,7 +33,6 @@ class Channel:
     store: Store
     recent: deque[Entry] = field(default_factory=lambda: deque(maxlen=15))
     seen: OrderedDict[str, None] = field(default_factory=OrderedDict)
-    known: OrderedDict[str, Entry] = field(default_factory=OrderedDict)
     records: list[Record] = field(default_factory=list)
     queue: deque[Callable[[], Awaitable[None]]] = field(default_factory=deque)
     session: Session | None = None
@@ -44,11 +42,6 @@ class Channel:
     retry_timer: str | None = None
     retry_ticket: str | None = None
     retry_delay: float = 60
-
-    def remember(self, entry):
-        self.known[entry.message.ref.id] = entry
-        while len(self.known) > 256:
-            self.known.popitem(last=False)
 
 
 class Sessions:
@@ -104,9 +97,6 @@ class Sessions:
         finally:
             channel.worker_id = None
 
-    def visible_ids(self, record):
-        return {item.message_id for turn in record.turns for item in turn if item.message_id is not None}
-
     async def accept(self, event: MessageReceived, *, tools):
         message = event.message
         if self.closed or message.is_self or not self.plugin.allowed(message):
@@ -126,10 +116,9 @@ class Sessions:
         now = self.clock()
         if channel.session and now - channel.session.last_wake >= self.config.idle_seconds:
             self.seal(channel)
-        entry = Entry.from_message(message, now)
+        entry = Entry(message, now)
         busy = len(channel.recent) == 15 and now - channel.recent[0].arrived <= self.config.busy_seconds
         channel.recent.append(entry)
-        channel.remember(entry)
         owner = self.plugin.is_owner(message)
         direct = message.conversation.kind == "direct"
         mention = any(p.type == "mention" and p.user == event.connection.bot for p in message.content)
@@ -139,7 +128,7 @@ class Sessions:
             return
         if channel.session:
             record = channel.session.record
-            record.waiting.append(entry.render(channel.known, self.visible_ids(record)))
+            record.waiting.append(ModelItem.from_message(message))
             channel.store.journal(channel.records)
         awake = explicit
         chance = None
@@ -173,7 +162,9 @@ class Sessions:
             return
         if channel.session is None:
             record = Record(id=uuid4().hex, model=self.config.default_model, owner=owner)
-            record.waiting = [e.render(channel.known, set()) for e in ([entry] if direct else channel.recent)]
+            record.waiting = [
+                ModelItem.from_message(e.message) for e in ([entry] if direct else channel.recent)
+            ]
             channel.session = Session(record, now)
             if not (direct and not owner):
                 channel.records.append(record)
@@ -182,7 +173,7 @@ class Sessions:
         trace = session.record.waiting
         session.record.waiting = []
         session.record.turns.append(trace)
-        snapshot = {e.id: e.images for e in channel.recent if e.images}
+        snapshot = {e.message.ref.id: e.images for e in channel.recent if e.images}
         context = ChatContext(
             conversation=message.conversation,
             correlation_id=event.event_id,
@@ -193,30 +184,15 @@ class Sessions:
         )
         persistent = not (direct and not owner)
         channel.store.journal(channel.records)
-        quoted = [e for e in channel.recent if e.message.reply_to]
-        self.enqueue(
-            channel, lambda: self.turn(channel, session.record, trace, context, persistent, tools, quoted)
-        )
+        self.enqueue(channel, lambda: self.turn(channel, session.record, trace, context, persistent, tools))
         if not persistent:
             channel.session = None
         return channel if persistent else None
 
-    async def turn(self, channel, record, trace, context, persistent, tools, quoted=()):
+    async def turn(self, channel, record, trace, context, persistent, tools):
         if self.closed:
             return
         await self.flush(channel)
-        for entry in quoted:
-            ref = entry.message.reply_to
-            if ref.id not in channel.known:
-                try:
-                    original = await self.ctx.messages.fetch(ref)
-                    channel.remember(Entry.from_message(original, self.clock()))
-                except Exception:
-                    log.debug("quoted message unavailable: %s", ref.id, exc_info=True)
-            # Include one level of quote detail even if earlier history has since been trimmed.
-            for i, item in enumerate(trace):
-                if item.message_id == entry.id:
-                    trace[i] = entry.render(channel.known, set())
         index = next(i for i, turn in enumerate(record.turns) if turn is trace)
 
         def checkpoint():
@@ -356,21 +332,6 @@ class Sessions:
             if conversation is not None:
                 channel = self.channel(conversation)
                 self.schedule(channel, "retry", 0)  # Timer waits for activation to commit.
-
-    def sent(self, event: MessageSent):
-        from accbot import ChatMessage, User
-
-        for ref in event.receipt.messages:
-            channel = self.channels.get(MemoryKey.of(ref.conversation).token)
-            if channel:
-                message = ChatMessage(
-                    ref=ref,
-                    sender=User(ref=event.connection.bot, name="[机器人名称]"),
-                    content=event.content,
-                    sent_at=event.receipt.accepted_at,
-                    is_self=True,
-                )
-                channel.remember(Entry.from_message(message, self.clock()))
 
     async def close(self):
         self.closed = True

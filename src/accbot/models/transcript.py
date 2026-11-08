@@ -30,12 +30,12 @@ def _record(item: ModelItem) -> list[ModelPart]:
     parts = [ModelPart(text="\n".join(lines) + "\n内容：\n"), *item.content]
     if item.reply_to is not None:
         quote = item.reply_to
-        lines = [f"\n引用消息id: {quote.message_id}"]
+        lines = ["\n引用消息："]
         if quote.sender is not None:
             lines.append(f"引用发送者：{_sender(quote.sender)}")
         if quote.sent_at is not None:
             lines.append(f"引用时间：{quote.sent_at.isoformat()}")
-        lines.append("引用原文：" if quote.content else "引用原文未提供。")
+        lines.append("引用原文：" if quote.content else "引用原文不可用。")
         parts.extend([ModelPart(text="\n".join(lines) + "\n"), *quote.content])
     return parts
 

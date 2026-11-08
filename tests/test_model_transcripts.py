@@ -8,8 +8,14 @@ from pydantic import ValidationError
 
 from accbot import (
     AssetRef,
+    ChatMessage,
     ConversationRef,
     FrameworkError,
+    GroupRef,
+    Member,
+    MessageBuilder,
+    MessageQuote,
+    MessageRef,
     ModelItem,
     ModelPart,
     ModelQuote,
@@ -58,7 +64,8 @@ def test_structured_transcript_preserves_metadata_quotes_and_multimodal_order(pr
         for s in ("用户 ID：1", "用户 ID：2", "平台：qq", "作用域：bot", "2026-11-07T12:30:15+00:00")
     )
     assert "引用发送者：被引用者（用户 ID：9；" in text
-    assert all(s in text for s in ("消息id: 1", "消息id: 2", "original", "被引用者", "原文"))
+    assert all(s in text for s in ("消息id: 1", "消息id: 2", "被引用者", "原文"))
+    assert "original" not in text and "引用消息id" not in text
     assert parts[0]["text"].endswith("图片之前")
     assert parts[1]["type"] == ("image_url" if protocol == "chat" else "input_image")
     assert parts[2]["text"].startswith("图片之后")
@@ -124,6 +131,43 @@ def test_metadata_cannot_be_silently_discarded_on_tool_or_provider_items():
     ):
         with pytest.raises(ValidationError):
             ModelItem(sender=user(), **fields)
+
+
+@pytest.mark.parametrize("protocol", ["chat", "responses"])
+def test_quote_snapshot_keeps_sender_and_body_with_or_without_original(protocol):
+    conversation = message("1", "").conversation
+    original = ChatMessage(
+        ref=MessageRef(conversation=conversation, id="a"),
+        sender=user("1", "昵称"),
+        member=Member(user=user(), group=GroupRef(platform="qq", scope="bot", id="group"), nickname="群名片"),
+        content=MessageBuilder()
+        .text("雨伞留在教室")
+        .mention(user("2").ref)
+        .media("image", AssetRef(url="https://unused.test/umbrella"))
+        .build(),
+        reply_to=MessageQuote(content=MessageBuilder().text("更早的引用不展开").build()),
+    )
+    reply = ChatMessage(
+        ref=MessageRef(conversation=conversation, id="b"),
+        sender=user("2"),
+        content=MessageBuilder().text("你明天帮我带来吧").build(),
+        reply_to=MessageQuote.from_message(original),
+    )
+    restored = ChatMessage.model_validate_json(reply.model_dump_json())
+    assert restored == reply
+    assert set(restored.reply_to.model_dump()) == {"sender", "content", "sent_at"}
+    assert restored.reply_to.sender.name == "群名片"
+    with pytest.raises(ValidationError):
+        restored.reply_to.content.segments[0].text = "修改原文"
+    a, b = ModelItem.from_message(original), ModelItem.from_message(restored)
+    before = b.model_dump_json()
+    for history in ([a, b], [b]):
+        content = encode_items(history, (), protocol)[0]["content"]
+        text = content if isinstance(content, str) else "".join(part["text"] for part in content)
+        assert "引用发送者：群名片（用户 ID：1；" in text
+        assert "引用原文：\n雨伞留在教室@2[图片]" in text
+        assert text.count("雨伞留在教室") == len(history)
+    assert "更早的引用" not in str(b) and b.model_dump_json() == before
 
 
 @pytest.mark.parametrize("protocol", ["chat", "responses"])

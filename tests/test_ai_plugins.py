@@ -18,6 +18,7 @@ from accbot import (
     GenerationResult,
     GroupMessageReceived,
     MessageBuilder,
+    MessageQuote,
     MessageReceived,
     MessageRef,
     ModelItem,
@@ -68,7 +69,6 @@ class Adapter:
     def __init__(self, connection):
         self.connection = connection
         self.sent = []
-        self.originals = {}
 
     async def send(self, target, content, *, reply_to, request_id):
         assert reply_to is None
@@ -80,9 +80,6 @@ class Adapter:
     async def send_file(self, target, asset, *, request_id):
         self.sent.append((target, asset))
         return SendReceipt(request_id=request_id, messages=())
-
-    async def fetch(self, ref):
-        return self.originals[ref.id]
 
     async def close(self):
         pass
@@ -119,7 +116,7 @@ def event(
         ref=MessageRef(conversation=conversation, id=number),
         sender=User(ref=UserRef(platform="qq", scope="scope", id=user), name="群友"),
         content=chain.build(),
-        reply_to=MessageRef(conversation=conversation, id=reply) if reply else None,
+        reply_to=reply,
     )
     return (MessageReceived if direct else GroupMessageReceived)(connection=source, message=message)
 
@@ -331,9 +328,9 @@ def test_group_gates_dedup_quote_memory_and_restart(setup_ai):
             await deliver(runtime, event("connection", connection="second"))
             assert not plugin.sessions.channels
             original = event("old", mention=False, text="引用原文").message
-            adapter.originals["old"] = original
-            await deliver(runtime, event(reply="old"))
-            await deliver(runtime, event(reply="old"))
+            quoted = event(reply=MessageQuote.from_message(original))
+            await deliver(runtime, quoted)
+            await deliver(runtime, quoted)
             assert len(adapter.sent) == 1
             assert "引用原文" in str(model.requests[0][0])
             channel = next(iter(plugin.sessions.channels.values()))
@@ -497,11 +494,11 @@ def test_same_name_and_content_keep_distinct_platform_message_ids(setup_ai):
             await deliver(runtime, second)
             channel = next(iter(plugin.sessions.channels.values()))
             a, b = channel.recent
-            assert a.nickname == b.nickname and a.text == b.text
-            assert a.id == "message-a" and b.id == "message-b"
-            quoted = type(a).from_message(event("reply", reply="message-a").message, 0)
-            rendered = quoted.render(channel.known, set())
-            assert rendered.message_id == "reply" and rendered.reply_to.message_id == "message-a"
+            assert a.message.sender.name == b.message.sender.name and a.message.content == b.message.content
+            assert a.message.ref.id == "message-a" and b.message.ref.id == "message-b"
+            quoted = event("reply", reply=MessageQuote.from_message(first.message))
+            rendered = ModelItem.from_message(quoted.message)
+            assert rendered.message_id == "reply" and rendered.reply_to.message_id is None
             assert rendered.reply_to.sender.ref == first.message.sender.ref
         finally:
             await runtime.close()

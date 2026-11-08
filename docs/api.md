@@ -26,7 +26,7 @@
 | `await model.generate(items, tools=..., system_prompt_id=..., persona_id=...)` | 选择并展开系统提示词，调用 Chat Completions 或 Responses，返回 GenerationResult |
 | `ctx.messages.send(conversation, chain, reply_to=...)` | 按连接路由消息，返回发送回执 |
 | `ctx.messages.send_file(conversation, asset)` | 使用适配器的独立文件上传操作并发布 FileSent |
-| `ctx.messages.fetch(message_ref)` | 在适配器支持时查询引用消息；不发布新的接收事件，不支持或消息已失效时抛异常 |
+| `ctx.messages.fetch(message_ref)` | 在适配器支持时查询消息；不发布新的接收事件，不支持或消息已失效时抛异常。入站引用由框架补齐，插件无需调用此接口补查 |
 | `ctx.messages.get_connection(id)` | 查询已配置的活动接入身份，返回不可变 ConnectionRef；不存在时返回 None，不暴露适配器对象 |
 | `ctx.tools.list()` | 当前活跃工具目录，调用插件自行筛选 |
 | `ToolDefinition.to_schema(protocol)` | 把内部工具声明编码为 chat/responses 的函数 Schema |
@@ -55,10 +55,11 @@
 | 对象 | 用途 |
 | --- | --- |
 | `ChatMessage` | 实际聊天消息，包含发送者、会话引用、时间和 MessageChain |
+| `MessageQuote` | ChatMessage.reply_to 中的单层快照，包含发送者、时间和 MessageChain；正文为 None 表示不可用，无消息 ID 或递归引用 |
 | `MessageChain` / `Segment` | 平台消息的不可变有序内容；文本、提及、媒体、自定义片段 |
 | `MessageBuilder` | 以 `.text()`、`.mention()`、`.media()`、`.add()` 组合消息，`.build()` 生成快照 |
 | `ModelItem` / `ModelPart` | 独立的模型上下文表示，不直接复用 ChatMessage |
-| `ModelQuote` | 单层引用的消息 ID、发送者、时间及多模态正文 |
+| `ModelQuote` | 模型上下文中的单层引用快照，展示发送者、时间及多模态正文，无需查询原消息 |
 | `GenerationResult` | 模型返回的内部消息、工具调用、用量与供应商状态 |
 | `ToolDefinition` | 工具 ID、说明和参数 Schema；注册表和模型输入都使用此类 |
 | `ToolCall` | 模型选择的工具及实参，交给执行器 |
@@ -66,6 +67,8 @@
 | `ToolResult` | 调用结果、错误或后台 task_id，业务值位于 value |
 
 接收和发送事件的消息内容均为 MessageChain。发送纯文本可显式使用 `MessageChain.text(text)`；`messages.send(target, text)` 是在入口立即转换为 MessageChain 的快捷形式，不会让裸字符串进入发送事件。裸 list 不是发送消息类型。
+
+接收消息的 `message.reply_to` 保存引用内容快照。发送引用回复时使用 `messages.send(message.conversation, chain, reply_to=message.ref)`，由适配器把 MessageRef 转成平台引用字段。
 
 消息和文件均由 MessageSender 校验会话身份、按连接选择适配器、取得回执并发布结果事件。事件通知失败不会改变已经取得的发送结果或覆盖原始发送异常；无法判定结果的底层异常标记为 unknown，不自动重发。
 
@@ -197,6 +200,8 @@ class Example(Plugin):
 ## 模型上下文
 
 ModelItem 独立于 ChatMessage。插件自行把群消息和动态记忆组织成 ModelItem；普通 user 消息可填写 `sender: User`、`sent_at: datetime`、`message_id: str`、`conversation: ConversationRef`、`reply_to: ModelQuote`，字段均可选。`ModelItem.text(role, text, **metadata)` 支持这些字段，工具返回可用 `ModelItem.tool_result(call_id, output)` 构造。
+
+`ModelItem.from_message(message)` 提供默认转换，保留身份、群名片、时间、消息 ID 和单层引用快照，以文字占位符表示媒体，不触发网络读取。引用独立于窗口中的原消息，始终展示已有发送者和正文；框架查询不到原文时明确标记不可用，插件无需维护任何引用索引。自定义内容仍可直接构造 ModelItem。
 
 模型层把相邻的普通 user 消息渲染为同一条群聊历史消息，保留文字和多模态内容的顺序。system/developer、助手、工具调用、工具结果及原生供应商项目阻断合并并保持原样；不能只用 role 判断工具结果。`accbot.models.render_items(items)` 提供同一渲染过程，供插件估算预算。框架不保存合并状态，不自动冻结此前请求；保持历史稳定由插件决定。详见 [群聊上下文](model-context.md)。
 

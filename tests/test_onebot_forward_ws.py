@@ -61,31 +61,47 @@ def test_forward_management_events_echo_and_backpressure(workspace, caplog):
 
         async def protocol(socket):
             await connections.put(socket)
+            quoted = incoming()
+            quoted["message"].insert(0, {"type": "reply", "data": {"id": 99}})
             for frame in (
                 "invalid JSON",
                 "[]",
                 '{"post_type":"message"}',
                 json.dumps({**incoming(), "self_id": 101, "message": "do-not-log-this-message"}),
-                json.dumps(incoming()),
+                json.dumps(quoted),
             ):
                 await socket.send(frame)
             async for frame in socket:
                 action = json.loads(frame)
-                assert action["action"] == "send_group_msg"
-                await socket.send(json.dumps(incoming(2)))
+                if action["action"] == "get_msg":
+                    assert action["params"] == {"message_id": "99"}
+                    data = {
+                        "message_id": 99,
+                        "message_type": "group",
+                        "group_id": 300,
+                        "sender": {"user_id": 201, "nickname": "原发送者"},
+                        "message": "引用原文",
+                    }
+                    await socket.send(json.dumps(incoming(2)))
+                else:
+                    assert action["action"] == "send_group_msg"
+                    data = {"message_id": 500}
+                    await socket.send(json.dumps(incoming(3)))
                 await socket.send(
                     json.dumps(
                         {
                             "status": "ok",
                             "retcode": 0,
                             "echo": action["echo"],
-                            "data": {"message_id": 500},
+                            "data": data,
                         }
                     )
                 )
 
         async def handler(event):
             if event.message.ref.id == "1":
+                assert event.message.reply_to.sender.ref.id == "201"
+                assert event.message.reply_to.content.plain_text == "引用原文"
                 receipt = await runtime.messages.send(event.message.conversation, "reply")
                 assert receipt.messages[0].id == "500"
                 replied.set()

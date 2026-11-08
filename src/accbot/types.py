@@ -163,6 +163,20 @@ class MessageChain(FrozenModel):
     def plain_text(self) -> str:
         return "".join(s.text or "" for s in self.segments if s.type == "text")
 
+    @property
+    def display_text(self) -> str:
+        """Readable content with media placeholders; never fetch assets implicitly."""
+        labels = {"image": "图片", "audio": "语音", "video": "视频", "file": "文件"}
+        parts = []
+        for segment in self:
+            if segment.type == "text":
+                parts.append(segment.text)
+            elif segment.type == "mention":
+                parts.append("@" + (segment.user.id if segment.user else "全体成员"))
+            else:
+                parts.append(f"[{labels.get(segment.type, segment.name)}]")
+        return "".join(parts)
+
 
 class MessageBuilder:
     def __init__(self):
@@ -185,18 +199,35 @@ class MessageBuilder:
         return MessageChain(segments=tuple(self._segments))
 
 
+class MessageQuote(FrozenModel):
+    """An independent, single-level snapshot. None content means unavailable."""
+
+    sender: User | None = None
+    content: MessageChain | None = None
+    sent_at: datetime | None = None
+
+    @classmethod
+    def from_message(cls, message: "ChatMessage") -> "MessageQuote":
+        return cls(sender=message.display_sender, content=message.content, sent_at=message.sent_at)
+
+
 class ChatMessage(FrozenModel):
     ref: MessageRef
     sender: User
     content: MessageChain
     sent_at: datetime | None = None
     member: Member | None = None
-    reply_to: MessageRef | None = None
+    reply_to: MessageQuote | None = None
     is_self: bool = False
 
     @property
     def conversation(self) -> ConversationRef:
         return self.ref.conversation
+
+    @property
+    def display_sender(self) -> User:
+        name = (self.member.nickname if self.member else None) or self.sender.name or self.sender.ref.id
+        return User(ref=self.sender.ref, name=" ".join(name.split())[:128])
 
 
 class SendReceipt(FrozenModel):

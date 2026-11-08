@@ -4,7 +4,7 @@ from typing import Any, Literal
 from pydantic import Field, model_validator
 
 from ..tools import ToolCall, ToolResult
-from ..types import AssetRef, ConversationRef, FrozenModel, User
+from ..types import AssetRef, ChatMessage, ConversationRef, FrozenModel, User
 
 
 class ModelPart(FrozenModel):
@@ -24,7 +24,7 @@ class ModelPart(FrozenModel):
 class ModelQuote(FrozenModel):
     """A single quoted message; no recursive transcript or provider state."""
 
-    message_id: str
+    message_id: str | None = None  # Optional provenance; never used to resolve or render a quote.
     sender: User | None = None
     sent_at: datetime | None = None
     content: tuple[ModelPart, ...] = ()
@@ -69,6 +69,26 @@ class ModelItem(FrozenModel):
     @classmethod
     def text(cls, role, text, **metadata):
         return cls(role=role, content=(ModelPart(text=text),), **metadata)
+
+    @classmethod
+    def from_message(cls, message: ChatMessage) -> "ModelItem":
+        """Project a received message and its quote to text, keeping media lazy."""
+        quote = message.reply_to
+        return cls.text(
+            "user",
+            message.content.display_text,
+            sender=message.display_sender,
+            sent_at=message.sent_at,
+            message_id=message.ref.id,
+            conversation=message.conversation,
+            reply_to=ModelQuote(
+                sender=quote.sender,
+                sent_at=quote.sent_at,
+                content=(ModelPart(text=quote.content.display_text),) if quote.content is not None else (),
+            )
+            if quote is not None
+            else None,
+        )
 
     @classmethod
     def tool_result(cls, call_id, output):

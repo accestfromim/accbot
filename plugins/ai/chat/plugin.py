@@ -2,7 +2,6 @@ from uuid import uuid4
 
 from accbot import MessageReceived, Tool, ToolDefinition, on_event, on_message
 from accbot import Plugin as BasePlugin
-from accbot.events import MessageSent
 
 from .agent import Agent
 from .context import ChatContext, MemoryContext
@@ -43,10 +42,6 @@ class Plugin(BasePlugin):
         self.config = config
         self.sessions = Sessions(self)
         await self.sessions.recover()
-
-    @on_event(MessageSent)
-    async def remember_sent_message(self, event: MessageSent):
-        self.sessions.sent(event)
 
     @on_message(group=lambda plugin: [g for g in plugin.config.groups if g.enabled], include_self=False)
     async def receive_group_message(self, event: MessageReceived):

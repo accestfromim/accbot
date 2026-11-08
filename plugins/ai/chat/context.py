@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from pydantic import Field
 
-from accbot import AssetRef, ChatMessage, ModelItem, ModelPart, ModelQuote, ToolContext, User, UserRef
+from accbot import AssetRef, ChatMessage, ModelItem, ToolContext, UserRef
 from accbot.models import render_items
 
 
@@ -25,56 +25,10 @@ class MemoryContext(ToolContext):
 class Entry:
     message: ChatMessage
     arrived: float
-    id: str
-    text: str
-    nickname: str
-    images: tuple[AssetRef, ...]
 
-    @classmethod
-    def from_message(cls, message: ChatMessage, arrived: float) -> "Entry":
-        nickname = (
-            (message.member.nickname if message.member else None)
-            or message.sender.name
-            or message.sender.ref.id
-        )
-        nickname = " ".join(nickname.split())[:128]
-        text, images = [], []
-        for part in message.content:
-            if part.type == "text":
-                text.append(part.text)
-            elif part.type == "mention":
-                text.append("@" + (part.name or (part.user.id if part.user else "全体成员")))
-            elif part.type == "image":
-                text.append("[图片]")
-                images.append(part.asset)
-        text = "".join(text)
-        return cls(message, arrived, message.ref.id, text, nickname, tuple(images))
-
-    def render(self, known, visible):
-        message = self.message
-        quote = None
-        if message.reply_to:
-            quoted = known.get(message.reply_to.id)
-            if quoted:
-                quote = ModelQuote(
-                    message_id=quoted.id,
-                    sender=User(ref=quoted.message.sender.ref, name=quoted.nickname),
-                    sent_at=quoted.message.sent_at,
-                    content=(ModelPart(text=quoted.text),)
-                    if quoted.id not in visible or quoted.message.is_self
-                    else (),
-                )
-            else:
-                quote = ModelQuote(message_id=message.reply_to.id)
-        return ModelItem.text(
-            "user",
-            self.text,
-            sender=User(ref=message.sender.ref, name=self.nickname),
-            sent_at=message.sent_at,
-            message_id=self.id,
-            conversation=message.conversation,
-            reply_to=quote,
-        )
+    @property
+    def images(self) -> tuple[AssetRef, ...]:
+        return tuple(part.asset for part in self.message.content if part.type == "image")
 
 
 def cost(items: Sequence[ModelItem]) -> int:

@@ -52,6 +52,8 @@ SnowLuma 文档给出的 WebSocket 地址是 `ws://snowluma:3001/`。两端运�
 
 `message` 字段支持消息段数组和 CQ 字符串，两者统一转成内部 MessageChain。字符串中的正文、`[CQ:at,qq=...]`、引用和媒体按 OneBot 11 解析；未知片段保留为 `onebot.<类型>` 自定义片段。先识别 CQ 片段再解码转义，因此用户输入的字面文本 `&#91;CQ:at,qq=...&#93;` 不会被当成真实提及。
 
+遇到引用时，适配器通过 `get_msg` 查询原消息，在发布事件前将发送者、时间和消息链保存为 `ChatMessage.reply_to` 快照。只查询一层，不追溯引用中的引用，也不下载媒体。查询失败、超时或返回不匹配的消息时，保留不可用的引用快照并继续分发正文。查询沿用接入配置的 API 超时；WebSocket 回执接收独立于事件处理，不会因等待引用查询而阻塞。
+
 SnowLuma 的 `messageFormat` 可选 `array` 或 `string`，官方默认配置为 `array`；`wsServers.role` 应为 `Universal`，以便同一连接接收事件和调用 API。参见 [SnowLuma 配置](https://snowluma.github.io/en/docs/guide/configuration) 与 [OneBot 字符串消息](https://github.com/botuniverse/onebot-11/blob/master/message/string.md)。
 
 连接建立和聊天会话唤醒是两个独立步骤。默认 AI 插件需要：

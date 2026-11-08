@@ -30,6 +30,7 @@ from ..types import (
     GroupRef,
     Member,
     MessageChain,
+    MessageQuote,
     MessageRef,
     Segment,
     SendReceipt,
@@ -94,15 +95,15 @@ class OneBotAdapter:
             "origin": EventOrigin(component=f"adapter:{self.connection.id}"),
         }
 
-    def decode(self, raw: dict):
+    async def decode(self, raw: dict, *, include_quote=True, conversation=None):
         try:
-            return self._decode(raw)
+            return await self._decode(raw, include_quote=include_quote, conversation=conversation)
         except FrameworkError:
             raise
         except (KeyError, TypeError, ValueError, AttributeError) as exc:
             raise FrameworkError(ErrorCode.INVALID_ARGUMENT, "invalid OneBot event structure") from exc
 
-    def _decode(self, raw: dict):
+    async def _decode(self, raw: dict, *, include_quote, conversation):
         if str(raw.get("self_id", self.config.self_id)) != self.config.self_id:
             raise FrameworkError(ErrorCode.INVALID_ARGUMENT, "OneBot self_id does not match connection")
         common = self._common(raw)
@@ -111,8 +112,10 @@ class OneBotAdapter:
             kind = "group" if raw.get("message_type") == "group" else "direct"
             sender_data = raw.get("sender") or {}
             sender = self.user(raw["user_id"], sender_data.get("nickname"))
-            conversation = self.conversation(raw["group_id"] if kind == "group" else raw["user_id"], kind)
-            segments, reply = [], None
+            conversation = conversation or self.conversation(
+                raw["group_id"] if kind == "group" else raw["user_id"], kind
+            )
+            segments, reply_ref = [], None
             source = raw.get("message", [])
             if isinstance(source, str):
                 source = parse_cq(source)
@@ -127,7 +130,7 @@ class OneBotAdapter:
                         else Segment(type="mention", user=self.user(data["qq"]).ref)
                     )
                 elif t == "reply":
-                    reply = MessageRef(conversation=conversation, id=str(data["id"]))
+                    reply_ref = MessageRef(conversation=conversation, id=str(data["id"]))
                 elif t in {"image", "record", "video", "file"}:
                     url = data.get("url")
                     file = str(data.get("file", ""))
@@ -151,6 +154,19 @@ class OneBotAdapter:
                 else:
                     segments.append(Segment(type="custom", name=f"onebot.{t}", data=data))
             is_self = sender.ref == self.connection.bot or post == "message_sent"
+            reply = None
+            if reply_ref is not None and include_quote:
+                reply = MessageQuote()
+                try:
+                    original = await self.fetch(reply_ref, include_quote=False)
+                    reply = MessageQuote.from_message(original)
+                except Exception as exc:
+                    log.debug(
+                        "OneBot quote unavailable: connection=%s message=%s error=%s",
+                        self.config.id,
+                        reply_ref.id,
+                        type(exc).__name__,
+                    )
             message = ChatMessage(
                 ref=MessageRef(conversation=conversation, id=str(raw["message_id"])),
                 sender=sender,
@@ -230,7 +246,10 @@ class OneBotAdapter:
             if future and not future.done():
                 future.set_result(raw)
             return None
-        event = self.decode(raw)
+        include_quote = (
+            raw.get("post_type") != "message_sent" and str(raw.get("user_id")) != self.connection.bot.id
+        )
+        event = await self.decode(raw, include_quote=include_quote)
         log.debug(
             "OneBot event decoded: connection=%s event=%s type=%s",
             self.config.id,
@@ -402,7 +421,7 @@ class OneBotAdapter:
         refs = (MessageRef(conversation=target, id=str(data["message_id"])),) if "message_id" in data else ()
         return SendReceipt(request_id=request_id, messages=refs)
 
-    async def fetch(self, ref):
+    async def fetch(self, ref, *, include_quote=True):
         from ..types import new_id
 
         if ref.conversation.kind not in {"group", "direct"}:
@@ -419,12 +438,13 @@ class OneBotAdapter:
             raise FrameworkError(ErrorCode.PROVIDER, "OneBot returned no message sender")
         if target.kind == "direct" and str(sender_id) not in {target.id, self.connection.bot.id}:
             raise FrameworkError(ErrorCode.PROVIDER, "OneBot returned an unrelated private message")
-        event = self.decode({**result, "post_type": "message", "user_id": sender_id, "group_id": target.id})
+        event = await self.decode(
+            {**result, "post_type": "message", "user_id": sender_id, "group_id": target.id},
+            include_quote=include_quote,
+            conversation=target,
+        )
         # get_msg's sender can be the bot itself; the requested private peer remains the destination.
-        reply = event.message.reply_to
-        if reply:
-            reply = reply.model_copy(update={"conversation": target})
-        return event.message.model_copy(update={"ref": ref, "reply_to": reply})
+        return event.message.model_copy(update={"ref": ref})
 
     async def resolve_asset(self, asset):
         from ..types import new_id

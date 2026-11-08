@@ -12,9 +12,13 @@ ModelItem 表示模型上下文，包含群聊常见元数据，由框架统一�
 | sent_at | datetime，可省略 | 原始发送时间；按 ISO 8601 输出，不填当前请求时间 |
 | message_id | str，可省略 | 插件选定的消息标识，不自动生成或重编号 |
 | conversation | ConversationRef，可省略 | 发言所在会话；用于区分群聊与私聊记录 |
-| reply_to | ModelQuote，可省略 | 单层引用，包含 message_id、可选 sender/sent_at 和 content |
+| reply_to | ModelQuote，可省略 | 单层快照，包含 sender、sent_at 和 content；不依赖原消息或窗口 |
 
 正文继续使用有序的 `tuple[ModelPart, ...]`，支持文本、图片与文件。ModelQuote 使用相同的正文类型，不递归嵌套引用。元数据不能与工具结果、助手输出或原生供应商项目混用，以免在原样传递时静默丢弃。
+
+接收事件的 `ChatMessage.reply_to` 是适配器补齐的 `MessageQuote`，其中正文为 MessageChain，不包含原消息 ID 或原消息对象。原文查询失败时 `content=None`，与没有引用（`reply_to=None`）区分。它作为当前消息的一部分独立保存，原消息离开观察窗口后无需再查询。
+
+默认转换只需要 `ModelItem.from_message(message)`：框架填写发送者（优先群名片）、时间、消息 ID、会话和引用，将提及及媒体转换为可读文字，不隐式读取媒体。插件也可按自己的策略直接构造 ModelItem 或多模态内容：
 
 ```python
 from accbot import ModelItem, ModelPart, ModelQuote
@@ -27,8 +31,7 @@ item = ModelItem.text(
     message_id=message.ref.id,
     conversation=message.conversation,
     reply_to=ModelQuote(
-        message_id=original.ref.id,
-        sender=original.sender,
+        sender=message.reply_to.sender,
         content=(ModelPart(text="你的雨伞落在教室了。"),),
     ),
 )
@@ -36,6 +39,8 @@ result = await model.generate([item], system_prompt_id="chat", persona_id="defau
 ```
 
 插件可以自由构造这些对象，不要求从 ChatMessage 转换，也不依赖特定聊天策略。
+
+引用始终输出快照中的发送者和正文，即使原消息也出现在历史中，两处内容仍分别保留。缺少原文时输出“引用原文不可用”，不提示模型凭消息 ID 查找。ModelQuote 的可选 `message_id` 仅作为调用方记录的来源标识，不参与查询和渲染。
 
 用户 ID 保存在 `sender.ref.id` 中（QQ 平台就是 QQ 号），引用发送者同理。序列化显式标注 `发送者：昵称（用户 ID：102；平台：qq；作用域：test）`；同名用户仍有各自的 ID。
 

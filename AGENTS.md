@@ -9,6 +9,7 @@ Read `docs/design.md` before changing framework contracts. Keep its checklist an
 - Adapters belong to framework source. Chat participation, context, memory, prompt/persona selection, tool selection and business storage belong to plugins.
 - Keep the default AI plugins in `plugins/ai/` and test fixtures in `tests/fixtures/`.
 - ModelItem has typed sender/time/message/conversation/quote fields. Serialization merges adjacent ordinary user items, preserving system, assistant, tool and provider boundaries. Plugins own history stability. Raw JSON message arrays bypass rendering and prompt/persona selection.
+- Adapters resolve incoming quotes into independent, single-level MessageQuote snapshots before dispatch. ModelItem.from_message preserves their sender and body; plugins never resolve quote IDs or maintain quote caches. Missing originals remain explicitly unavailable.
 - Never auto-activate missing dependencies. Validate the complete selected graph before activation.
 - Unload removes registrations; accepted background tools finish naturally. Preserve activation identity across timers, queued callbacks and public API handles.
 - Source reload uses isolated module generations, including plugin-local submodules. Shared third-party modules are not reloaded.

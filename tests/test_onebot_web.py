@@ -5,10 +5,19 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from accbot import FrameworkError, GroupMessageReceived, MessageBuilder, MessageReceived
+from accbot import (
+    FrameworkError,
+    GroupMessageReceived,
+    MessageBuilder,
+    MessageQuote,
+    MessageReceived,
+    MessageRef,
+    ModelItem,
+)
 from accbot.adapters.onebot import OneBotAdapter
 from accbot.config import ConfigStore, ModelCard, OneBotConfig, Settings
 from accbot.events import CustomEvent, EventBus, FileReceived, FileSent, MemberLeft, MessageSent
+from accbot.models import render_items
 from accbot.runtime import Runtime
 from accbot.web import create_app
 
@@ -34,48 +43,56 @@ def incoming(**changes):
 
 
 def test_mapping_scope_notice_file_and_custom():
-    adapter = OneBotAdapter(OneBotConfig(id="main", self_id="100"), EventBus(), None, lambda _: "")
-    event = adapter.decode(incoming())
-    assert isinstance(event, GroupMessageReceived)
-    assert event.message.ref.id == "400" and event.message.reply_to.id == "399"
-    assert event.message.member.nickname == "group name"
-    assert [s.type for s in event.message.content] == ["text", "mention", "image"]
-    other = OneBotAdapter(OneBotConfig(id="other", self_id="100"), EventBus(), None, lambda _: "")
-    assert other.decode(incoming()).message.sender.ref != event.message.sender.ref
-    left = adapter.decode(
-        {
-            "post_type": "notice",
-            "notice_type": "group_decrease",
-            "sub_type": "kick",
-            "group_id": 300,
-            "user_id": 200,
-            "operator_id": 201,
-        }
-    )
-    assert isinstance(left, MemberLeft) and left.operator.ref.id == "201" and left.user.ref.id == "200"
-    file = adapter.decode(
-        {
-            "post_type": "notice",
-            "notice_type": "group_upload",
-            "group_id": 300,
-            "user_id": 200,
-            "file": {"id": "f", "name": "report", "size": 12},
-        }
-    )
-    assert isinstance(file, FileReceived) and file.asset.size == 12
-    assert isinstance(adapter.decode({"post_type": "notice", "notice_type": "notify", "x": 1}), CustomEvent)
-    with pytest.raises(FrameworkError) as invalid:
-        adapter.decode({"post_type": "message"})
-    assert invalid.value.info.code == "invalid_argument"
+    async def run():
+        adapter = OneBotAdapter(OneBotConfig(id="main", self_id="100"), EventBus(), None, lambda _: "")
+        event = await adapter.decode(incoming())
+        assert isinstance(event, GroupMessageReceived)
+        assert event.message.ref.id == "400" and event.message.reply_to == MessageQuote()
+        assert event.message.member.nickname == "group name"
+        assert [s.type for s in event.message.content] == ["text", "mention", "image"]
+        other = OneBotAdapter(OneBotConfig(id="other", self_id="100"), EventBus(), None, lambda _: "")
+        assert (await other.decode(incoming())).message.sender.ref != event.message.sender.ref
+        left = await adapter.decode(
+            {
+                "post_type": "notice",
+                "notice_type": "group_decrease",
+                "sub_type": "kick",
+                "group_id": 300,
+                "user_id": 200,
+                "operator_id": 201,
+            }
+        )
+        assert isinstance(left, MemberLeft) and left.operator.ref.id == "201" and left.user.ref.id == "200"
+        file = await adapter.decode(
+            {
+                "post_type": "notice",
+                "notice_type": "group_upload",
+                "group_id": 300,
+                "user_id": 200,
+                "file": {"id": "f", "name": "report", "size": 12},
+            }
+        )
+        assert isinstance(file, FileReceived) and file.asset.size == 12
+        assert isinstance(
+            (await adapter.decode({"post_type": "notice", "notice_type": "notify", "x": 1})), CustomEvent
+        )
+        with pytest.raises(FrameworkError) as invalid:
+            (await adapter.decode({"post_type": "message"}))
+        assert invalid.value.info.code == "invalid_argument"
+
+    asyncio.run(run())
 
 
 def test_cq_and_array_messages_have_identical_internal_content():
-    adapter = OneBotAdapter(OneBotConfig(id="main", self_id="100"), EventBus(), None, lambda _: "")
-    cq = "hi[CQ:reply,id=399][CQ:at,qq=100][CQ:image,file=image-id,url=https://media.test/image]"
-    # Asset handles are newly allocated for each decode; their platform references must match.
-    exclude = {"content": {"segments": {"__all__": {"asset": {"id"}}}}}
-    actual = adapter.decode(incoming(message=cq)).message.model_dump(exclude=exclude)
-    assert actual == adapter.decode(incoming()).message.model_dump(exclude=exclude)
+    async def run():
+        adapter = OneBotAdapter(OneBotConfig(id="main", self_id="100"), EventBus(), None, lambda _: "")
+        cq = "hi[CQ:reply,id=399][CQ:at,qq=100][CQ:image,file=image-id,url=https://media.test/image]"
+        # Asset handles are newly allocated for each decode; their platform references must match.
+        exclude = {"content": {"segments": {"__all__": {"asset": {"id"}}}}}
+        actual = (await adapter.decode(incoming(message=cq))).message.model_dump(exclude=exclude)
+        assert actual == (await adapter.decode(incoming())).message.model_dump(exclude=exclude)
+
+    asyncio.run(run())
 
 
 @pytest.mark.parametrize(
@@ -89,27 +106,39 @@ def test_cq_and_array_messages_have_identical_internal_content():
     ],
 )
 def test_cq_text_escapes_and_malformed_codes_remain_text(source, expected):
-    adapter = OneBotAdapter(OneBotConfig(id="main", self_id="100"), EventBus(), None, lambda _: "")
-    content = adapter.decode(incoming(message=source)).message.content
-    assert content == MessageBuilder().text(expected).build()
+    async def run():
+        adapter = OneBotAdapter(OneBotConfig(id="main", self_id="100"), EventBus(), None, lambda _: "")
+        content = (await adapter.decode(incoming(message=source))).message.content
+        assert content == MessageBuilder().text(expected).build()
+
+    asyncio.run(run())
 
 
 def test_cq_unknown_segments_parameters_and_empty_message():
-    adapter = OneBotAdapter(OneBotConfig(id="main", self_id="100"), EventBus(), None, lambda _: "")
-    content = adapter.decode(
-        incoming(message="[CQ:shake][CQ:share,title=a=b&#44;\n&#91;x&#93;&amp;#44;,url=https://test/?a=b]")
-    ).message.content
-    shake, share = content
-    assert shake.type == "custom" and shake.name == "onebot.shake" and shake.data == {}
-    assert share.name == "onebot.share"
-    assert share.data == {"title": "a=b,\n[x]&#44;", "url": "https://test/?a=b"}
-    assert adapter.decode(incoming(message="")).message.content.segments == ()
+    async def run():
+        adapter = OneBotAdapter(OneBotConfig(id="main", self_id="100"), EventBus(), None, lambda _: "")
+        content = (
+            await adapter.decode(
+                incoming(
+                    message="[CQ:shake][CQ:share,title=a=b&#44;\n&#91;x&#93;&amp;#44;,url=https://test/?a=b]"
+                )
+            )
+        ).message.content
+        shake, share = content
+        assert shake.type == "custom" and shake.name == "onebot.shake" and shake.data == {}
+        assert share.name == "onebot.share"
+        assert share.data == {"title": "a=b,\n[x]&#44;", "url": "https://test/?a=b"}
+        assert (await adapter.decode(incoming(message=""))).message.content.segments == ()
+
+    asyncio.run(run())
 
 
 def test_http_send_roundtrip_dedup_and_self_echo(workspace):
     requests = []
 
     def endpoint(request):
+        if request.url.path == "/get_msg":
+            return httpx.Response(200, json={"status": "failed", "retcode": 1})
         requests.append(json.loads(request.content))
         return httpx.Response(200, json={"status": "ok", "retcode": 0, "data": {"message_id": 500}})
 
@@ -130,7 +159,7 @@ def test_http_send_roundtrip_dedup_and_self_echo(workspace):
             adapter = runtime.messages.adapters["main"]
             await adapter.ingest(incoming())
             await adapter.ingest(incoming())
-            source = adapter.decode(incoming()).message
+            source = (await adapter.decode(incoming())).message
             receipt = await runtime.messages.send(
                 source.conversation, MessageBuilder().text("reply").build(), reply_to=source.ref
             )
@@ -168,7 +197,7 @@ def test_message_lookup_maps_quotes_and_rejects_wrong_conversations():
             )
             sender = MessageSender(bus)
             sender.add_adapter(adapter)
-            ref = adapter.decode(incoming()).message.reply_to
+            ref = MessageRef(conversation=adapter.conversation("300"), id="399")
             message = await sender.fetch(ref)
             assert message.ref == ref and message.content.plain_text == "original"
             reply["group_id"] = 900
@@ -183,6 +212,96 @@ def test_message_lookup_maps_quotes_and_rejects_wrong_conversations():
             message = await sender.fetch(direct)
             assert message.is_self and message.conversation.id == "200"
         await bus.close()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("cq", [False, True])
+@pytest.mark.parametrize("private", [False, True])
+def test_ingress_delivers_single_level_quote_snapshot(cq, private):
+    async def run():
+        calls, received = [], []
+        original = {
+            "message_type": "private" if private else "group",
+            "message_id": 399,
+            "time": 1700000000,
+            "sender": {"user_id": 100, "nickname": "[机器人名称]", "card": "群名片"},
+            "message": [
+                {"type": "text", "data": {"text": "原始正文"}},
+                {"type": "image", "data": {"file": "image-id"}},
+                {"type": "reply", "data": {"id": 398}},
+            ],
+        }
+
+        def endpoint(request):
+            calls.append(json.loads(request.content))
+            assert request.url.path == "/get_msg"
+            return httpx.Response(200, json={"status": "ok", "data": original})
+
+        bus = EventBus()
+        bus.subscribe(MessageReceived, received.append)
+        try:
+            async with httpx.AsyncClient(transport=httpx.MockTransport(endpoint)) as http:
+                adapter = OneBotAdapter(
+                    OneBotConfig(id="main", self_id="100", http_url="https://qq.test"),
+                    bus,
+                    http,
+                    lambda _: "",
+                )
+                raw = incoming(message_type=original["message_type"])
+                if cq:
+                    raw["message"] = "hi[CQ:reply,id=399]"
+                await adapter.ingest(raw)
+                await bus.drain()
+                message = received[0].message
+                assert message.conversation.id == ("200" if private else "300")
+                quote = message.reply_to
+                assert quote.sender.ref == adapter.connection.bot
+                assert quote.sender.name == ("[机器人名称]" if private else "群名片")
+                assert quote.content.display_text == "原始正文[图片]" and quote.sent_at is not None
+                assert bus.decode(received[0].to_dict()).message == message
+                assert calls == [{"message_id": "399"}]  # No nested lookup or asset download.
+                original["message"][0]["data"]["text"] = "后来的修改"
+                assert message.reply_to.content.plain_text == "原始正文"
+        finally:
+            await bus.close()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("failure", ["missing", "timeout", "wrong_group", "malformed"])
+def test_quote_lookup_failure_preserves_incoming_body(failure):
+    async def run():
+        received = []
+
+        def endpoint(request):
+            if failure == "timeout":
+                raise httpx.ReadTimeout("expired")
+            data = {"message_id": 399, "message_type": "group", "group_id": 999}
+            if failure == "malformed":
+                data = {"message_id": 399, "message_type": "group", "sender": "invalid sender"}
+            return httpx.Response(
+                200, json={"status": "failed" if failure == "missing" else "ok", "data": data}
+            )
+
+        bus = EventBus()
+        bus.subscribe(MessageReceived, received.append)
+        try:
+            async with httpx.AsyncClient(transport=httpx.MockTransport(endpoint)) as http:
+                adapter = OneBotAdapter(
+                    OneBotConfig(id="main", self_id="100", http_url="https://qq.test"),
+                    bus,
+                    http,
+                    lambda _: "",
+                )
+                await adapter.ingest(incoming())
+                await bus.drain()
+                message = received[0].message
+                assert message.content.plain_text == "hi" and message.reply_to == MessageQuote()
+                rendered = render_items([ModelItem.from_message(message)])[0].content[0].text
+                assert "引用原文不可用" in rendered and "399" not in rendered
+        finally:
+            await bus.close()
 
     asyncio.run(run())
 
@@ -299,6 +418,7 @@ def test_websocket_echo_progresses_when_event_bus_is_full(workspace):
 
     async def handler(event):
         if event.message.ref.id == "400":
+            assert event.message.reply_to.content.plain_text == "original"
             receipt = await runtime.messages.send(event.message.conversation, "reply")
             received.append(receipt.messages[0].id)
 
@@ -306,8 +426,23 @@ def test_websocket_echo_progresses_when_event_bus_is_full(workspace):
         runtime.events.subscribe(MessageReceived, handler)
         with client.websocket_connect("/onebot/main/ws") as ws:
             ws.send_json(incoming())
+            lookup = ws.receive_json()
+            assert lookup["action"] == "get_msg" and lookup["params"] == {"message_id": "399"}
+            ws.send_json(incoming(message_id=401, message="another"))
+            ws.send_json(
+                {
+                    "echo": lookup["echo"],
+                    "status": "ok",
+                    "data": {
+                        "message_id": 399,
+                        "message_type": "group",
+                        "message": "original",
+                        "sender": {"user_id": 201},
+                    },
+                }
+            )
             action = ws.receive_json()
-            ws.send_json(incoming(message_id=401))
+            assert action["action"] == "send_group_msg"
             ws.send_json({"echo": action["echo"], "status": "ok", "retcode": 0, "data": {"message_id": 999}})
             client.portal.call(runtime.events.drain)
             assert received == ["999"]
@@ -333,7 +468,7 @@ def test_file_notification_resolves_url_only_when_read(workspace):
         )
         async with httpx.AsyncClient(transport=httpx.MockTransport(endpoint)) as http:
             runtime = Runtime(workspace[1], http=http)
-            event = runtime.messages.adapters["main"].decode(
+            event = await runtime.messages.adapters["main"].decode(
                 {
                     "post_type": "notice",
                     "notice_type": "group_upload",
