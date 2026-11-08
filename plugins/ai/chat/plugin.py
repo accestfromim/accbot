@@ -173,5 +173,9 @@ class Plugin(BasePlugin):
         return {
             "conversations": len(self.sessions.channels),
             "active_sessions": sum(c.session is not None for c in self.sessions.channels.values()),
-            "pending_memories": sum(len(c.records) for c in self.sessions.channels.values()),
+            "pending_memories": sum(
+                bool(record.turns or record.waiting)
+                for channel in self.sessions.channels.values()
+                for record in channel.records
+            ),
         }

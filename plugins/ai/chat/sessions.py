@@ -12,7 +12,7 @@ from uuid import uuid4
 
 from accbot import ConversationRef, MessageChain, MessageReceived, ModelItem
 
-from .context import ChatContext, Entry, MemoryContext
+from .context import ChatContext, Entry, MemoryContext, cost
 from .events import SummarizeMemory
 from .identity import MemoryKey
 from .memory import Record, Store, empty_memory
@@ -200,6 +200,13 @@ class Sessions:
                 channel.store.journal(channel.records)
 
         try:
+            if (
+                persistent
+                and index
+                and self.budget_reached(channel, record, record.turns[: index + 1], context, tools)
+            ):
+                await self.request_compaction(channel, record, index)
+                index = 0
             answer = await self.agent.run(
                 record.model,
                 channel.store.load() if persistent else empty_memory(),
@@ -222,26 +229,55 @@ class Sessions:
                     )
                 except Exception:
                     log.exception("could not send AI error notice")
+            return
         finally:
             checkpoint()
-            if not self.closed and self.ctx.owner.active:
-                # A retired generation must not resolve its old tool prompts again.
-                memory = channel.store.load() if persistent else empty_memory()
-                selected = self.agent.context(
-                    memory,
-                    record.owner,
-                    context.bot,
-                    record.turns[:index],
-                    trace,
-                    self.agent.budget(
-                        self.config,
-                        self.config.owner_prompt_id if record.owner else self.config.chat_prompt_id,
-                        self.config.persona_id,
-                        tools,
-                    ),
+        if persistent and not self.closed and self.ctx.owner.active:
+            try:
+                if self.budget_reached(channel, record, record.turns[: index + 1], context, tools):
+                    await self.request_compaction(channel, record, index + 1)
+            except Exception:
+                log.exception(
+                    "AI budget memory update failed; history retained: %s", channel.conversation.key
                 )
-                del record.turns[: selected.first_turn]
-                checkpoint()
+
+    def budget_reached(self, channel, record, turns, context, tools):
+        items = self.agent.context(channel.store.load(), record.owner, context.bot, turns, [])
+        budget = self.agent.budget(
+            self.config,
+            self.config.owner_prompt_id if record.owner else self.config.chat_prompt_id,
+            self.config.persona_id,
+            tools,
+        )
+        return cost(items) >= budget - self.config.context_budget // 20
+
+    async def request_compaction(self, channel, record, count):
+        event = SummarizeMemory(
+            memory_key=channel.store.key, ticket=record.id, reason="budget", turn_count=count
+        )
+        receipt = await self.ctx.publish(event)
+        await receipt.wait()
+        if record.id == event.ticket:
+            raise ValueError("记忆整理失败，历史已保留")
+
+    async def compact(self, channel, event):
+        record = next((r for r in channel.records if r.id == event.ticket), None)
+        if record is None or not 0 < event.turn_count <= len(record.turns):
+            return
+        snapshot = record.model_copy(update={"turns": record.turns[: event.turn_count], "waiting": []})
+        memory = await self.agent.summarize(
+            snapshot,
+            channel.store.load(),
+            self.plugin.memory_tools(),
+            self.config,
+            MemoryContext(conversation=channel.conversation, correlation_id=event.event_id),
+            lambda: not self.closed and self.ctx.owner.active,
+        )
+        # A prefix commit must never mark the entire pending record as committed.
+        channel.store.save(memory, f"{record.id}:budget")
+        del record.turns[: event.turn_count]
+        record.id = uuid4().hex
+        channel.store.journal(channel.records)
 
     def seal(self, channel):
         self.cancel(channel, "idle")
@@ -264,7 +300,7 @@ class Sessions:
         while channel.records and channel.records[0].sealed and not self.closed:
             record = channel.records[0]
             try:
-                if not channel.store.committed(record.id):
+                if record.turns and not channel.store.committed(record.id):
                     memory = await self.agent.summarize(
                         record,
                         channel.store.load(),
@@ -286,7 +322,12 @@ class Sessions:
 
     async def summarize(self, event: SummarizeMemory):
         channel = self.channels.get(event.memory_key.token)
-        if self.closed or channel is None or event.ticket != getattr(channel, f"{event.reason}_ticket"):
+        if self.closed or channel is None:
+            return
+        if event.reason == "budget":
+            await self.compact(channel, event)
+            return
+        if event.ticket != getattr(channel, f"{event.reason}_ticket"):
             return
         self.cancel(channel, event.reason)
         if event.reason == "retry":

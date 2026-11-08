@@ -5,7 +5,7 @@ from pathlib import Path
 
 from accbot import AssetRef, ModelItem, ModelPart, ToolCall, ToolDefinition, ToolResult, UserRef
 
-from .context import ChatContext, MemoryContext, close_tool_calls, cost, window
+from .context import ChatContext, MemoryContext, close_tool_calls, cost
 from .profiles import Profiles, participants
 
 
@@ -41,14 +41,13 @@ class Agent:
             )
         return items
 
-    def context(self, memory, owner, bot, history, current, budget, *, profile_cache=None):
+    def context(self, memory, owner, bot, history, current, budget=None, *, profile_cache=None):
         cache = {} if profile_cache is None else profile_cache
-        return window(
-            lambda items: self.prefix(memory, owner, bot, self.profiles.items(items, cache)),
-            history,
-            current,
-            budget,
-        )
+        items = [item for turn in history for item in turn] + list(current)
+        items = self.prefix(memory, owner, bot, self.profiles.items(items, cache)) + items
+        if budget is not None and cost(items) > budget:
+            raise ValueError("完整上下文超过预算，请缩短消息或提高预算；历史未被裁剪")
+        return items
 
     def budget(self, config, prompt_id, persona_id, tools):
         text = self.ctx.prompts.render(prompt_id, persona_id=persona_id, tools=tools)
@@ -91,7 +90,7 @@ class Agent:
                     profile_cache=profile_cache,
                 )
                 result = await model.generate(
-                    selected.items, tools=tools, system_prompt_id=prompt_id, persona_id=config.persona_id
+                    selected, tools=tools, system_prompt_id=prompt_id, persona_id=config.persona_id
                 )
                 if result.finish_reason in {"length", "max_output_tokens", "incomplete"}:
                     raise ValueError("模型输出被截断")
@@ -167,13 +166,11 @@ class Agent:
                 self.budget(config, config.memory_prompt_id, None, tools),
                 profile_cache=profile_cache,
             )
-            if record.turns and selected.first_turn == len(record.turns):
-                raise ValueError("记忆整理预算不足，无法保留任何会话轮次")
             tool_context = context.model_copy(
-                update={"profile_users": tuple(participants(selected.items).values())}
+                update={"profile_users": tuple(participants(selected).values())}
             )
             result = await model.generate(
-                selected.items, tools=tools, system_prompt_id=config.memory_prompt_id, **options
+                selected, tools=tools, system_prompt_id=config.memory_prompt_id, **options
             )
             if not running():
                 raise asyncio.CancelledError

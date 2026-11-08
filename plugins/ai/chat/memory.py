@@ -149,6 +149,7 @@ class Store:
         )
 
     def journal(self, records):
+        records = [record for record in records if record.turns or record.waiting]
         if not records:
             self.pending_path.unlink(missing_ok=True)
             return

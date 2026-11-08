@@ -1,7 +1,7 @@
-"""Conversation rendering and whole-turn context budgeting, independent of providers."""
+"""Typed chat context and conservative size estimation, independent of providers."""
 
 import json
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from pydantic import Field
@@ -41,37 +41,6 @@ def cost(items: Sequence[ModelItem]) -> int:
         for part in item.content:
             total += 8192 if part.type == "image" else len((part.text or "").encode())
     return total
-
-
-@dataclass
-class Window:
-    items: list[ModelItem]
-    first_turn: int
-
-
-def window(
-    prefix: Sequence[ModelItem] | Callable[[Sequence[ModelItem]], Sequence[ModelItem]],
-    turns: Sequence[Sequence[ModelItem]],
-    current: Sequence[ModelItem],
-    budget: int,
-) -> Window:
-    def prepend(items):
-        return list(prefix(items) if callable(prefix) else prefix)
-
-    items, first_turn = list(current), len(turns)
-    header, used = prepend(items), cost(current)
-    if cost(header) + used > budget:
-        raise ValueError("当前轮次超过上下文预算，请缩短消息或提高预算")
-    for index in range(len(turns) - 1, -1, -1):
-        turn = turns[index]
-        size = cost(turn)
-        candidate = list(turn) + items
-        candidate_header = prepend(candidate)
-        if cost(candidate_header) + used + size > budget:
-            break
-        used += size
-        items, header, first_turn = candidate, candidate_header, index
-    return Window(header + items, first_turn)
 
 
 def close_tool_calls(items: Sequence[ModelItem]) -> list[ModelItem]:

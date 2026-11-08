@@ -86,7 +86,7 @@ def test_profiles_follow_users_across_groups_connections_reload_and_restart(setu
     asyncio.run(run())
 
 
-def test_profile_budget_uses_retained_senders_and_quotes_only(setup_ai):
+def test_profile_budget_counts_all_history_and_quotes_without_trimming(setup_ai):
     async def run():
         runtime, plugin, _ = await setup_ai()
         try:
@@ -106,11 +106,12 @@ def test_profile_budget_uses_retained_senders_and_quotes_only(setup_ai):
                 )
             ]
             baseline = plugin.agent.context(memory, False, None, [], current, 100000)
-            budget = cost(baseline.items) + cost(old) + 10
-            selected = plugin.agent.context(memory, False, None, [old], current, budget)
-            assert selected.first_turn == 1 and cost(selected.items) <= budget
-            assert "CURRENT PROFILE" in str(selected.items) and "QUOTED PROFILE" in str(selected.items)
-            assert "OLD PROFILE" not in str(selected.items)
+            budget = cost(baseline) + cost(old) + 10
+            with pytest.raises(ValueError, match="预算"):
+                plugin.agent.context(memory, False, None, [old], current, budget)
+            selected = plugin.agent.context(memory, False, None, [old], current, 100000)
+            assert all(name in str(selected) for name in ("CURRENT PROFILE", "QUOTED PROFILE", "OLD PROFILE"))
+            assert "OLD PROFILE" not in str(baseline)
             with pytest.raises(ValueError, match="预算"):
                 plugin.agent.context(memory, False, None, [], current, cost(current) + 10)
             # IDs are path components, never filesystem paths supplied by the model.

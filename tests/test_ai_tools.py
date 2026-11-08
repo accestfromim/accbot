@@ -28,21 +28,7 @@ network = module("_test_ai_network", "plugins/ai/tools/network.py")
 vision = module("_test_ai_vision", "plugins/ai/tools/vision.py")
 
 
-def test_context_trims_whole_turns_and_preserves_current_and_prefix():
-    prefix = [ModelItem.text("system", "personality and memory")]
-    old = [
-        ModelItem.text("user", "old"),
-        ModelItem(role="assistant", calls=(ToolCall(id="a", name="web"),)),
-        ModelItem.tool_result("a", {"data": "x" * 2000}),
-    ]
-    recent = [ModelItem.text("user", "recent"), ModelItem.text("assistant", "answer")]
-    current = [ModelItem.text("user", "new")]
-    budget = context.cost(prefix + recent + current)
-    selected = context.window(prefix, [old, recent], current, budget)
-    assert selected.items == prefix + recent + current
-    assert selected.first_turn == 1
-    with pytest.raises(ValueError):
-        context.window(prefix, [], current, 1)
+def test_interrupted_tool_calls_are_closed_without_replaying():
     unfinished = [ModelItem(role="assistant", calls=(ToolCall(id="x", name="send_text"),))]
     repaired = context.close_tool_calls(unfinished)
     assert repaired[-1].call_id == "x" and "结果未知" in repaired[-1].output["error"]
