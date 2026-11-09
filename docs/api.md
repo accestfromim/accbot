@@ -68,6 +68,12 @@
 
 接收和发送事件的消息内容均为 MessageChain。发送纯文本可显式使用 `MessageChain.text(text)`；`messages.send(target, text)` 是在入口立即转换为 MessageChain 的快捷形式，不会让裸字符串进入发送事件。裸 list 不是发送消息类型。
 
+`ctx.messages` 自动绑定当前插件来源，仍通过共享发送管理器路由到适配器。成功后的 `MessageSent.source_plugin_id` 是发起发送的插件 ID；直接使用 `runtime.messages` 时为 `None`。事件的 `origin` 同时保留插件 ID 与激活 ID，文件发送和发送失败通知也保留该来源。来源指实际调用发送接口的插件，例如聊天插件调用工具插件发消息时，来源是工具插件。
+
+使用 `@on_event(MessageSent)` 订阅成功发送通知；它不属于 `MessageReceived`，不会匹配 `@on_message`。`event.message` 将一次逻辑发送转换成 `is_self=True` 的 ChatMessage，包含当前接入的机器人身份、发送正文和回执时间，适合交给 `ModelItem.from_message`。回执有多个消息 ID 时使用第一个标识整次发送，正文只记录一次；回执没有消息 ID 时该属性为 `None`。该快照不查询引用原文。
+
+发送通知沿用事件总线的激活检查。已接受的后台工具可以在停用后完成发送，但其失效来源通知只供框架诊断订阅观察，不进入业务插件的新实例。插件自行决定是否将其他来源的消息纳入上下文，以及是否触发聊天；框架不据此唤醒模型。
+
 接收消息的 `message.reply_to` 保存引用内容快照。发送引用回复时使用 `messages.send(message.conversation, chain, reply_to=message.ref)`，由适配器把 MessageRef 转成平台引用字段。
 
 消息和文件均由 MessageSender 校验会话身份、按连接选择适配器、取得回执并发布结果事件。事件通知失败不会改变已经取得的发送结果或覆盖原始发送异常；无法判定结果的底层异常标记为 unknown，不自动重发。

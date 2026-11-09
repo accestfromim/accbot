@@ -1,6 +1,6 @@
 from uuid import uuid4
 
-from accbot import MessageReceived, Tool, ToolDefinition, on_event, on_message
+from accbot import MessageReceived, MessageSent, Tool, ToolDefinition, on_event, on_message
 from accbot import Plugin as BasePlugin
 
 from .agent import Agent
@@ -73,6 +73,10 @@ class Plugin(BasePlugin):
     )
     async def receive_private_message(self, event: MessageReceived):
         await self.sessions.accept(event, tools=self.tool_list(kind="direct"))
+
+    @on_event(MessageSent)
+    def receive_sent_message(self, event: MessageSent):
+        self.sessions.observe_sent(event)
 
     @on_event(SummarizeMemory)
     async def summarize_memory(self, event: SummarizeMemory):

@@ -8,7 +8,8 @@ from typing import Protocol
 import httpx
 
 from .errors import ErrorCode, FrameworkError, Outcome, error_info
-from .events import EventBus, FileSent, MessageSendFailed, MessageSent
+from .events import EventBus, EventOrigin, FileSent, MessageSendFailed, MessageSent
+from .lifecycle import Activation
 from .types import AssetRef, ConnectionRef, ConversationRef, MessageChain, MessageRef, SendReceipt, new_id
 
 log = logging.getLogger(__name__)
@@ -58,7 +59,12 @@ class MessageSender:
         return message
 
     async def send(
-        self, target: ConversationRef, content: MessageChain | str, *, reply_to=None
+        self,
+        target: ConversationRef,
+        content: MessageChain | str,
+        *,
+        reply_to=None,
+        _source: Activation | None = None,
     ) -> SendReceipt:
         if reply_to is not None and reply_to.conversation != target:
             raise FrameworkError(
@@ -69,19 +75,25 @@ class MessageSender:
             raise FrameworkError(ErrorCode.INVALID_ARGUMENT, "send requires a MessageChain or text")
         if not content.segments:
             raise FrameworkError(ErrorCode.INVALID_ARGUMENT, "empty message")
-        return await self._send(target, "send", content, reply_to=reply_to)
+        return await self._send(target, "send", content, source=_source, reply_to=reply_to)
 
-    async def send_file(self, target: ConversationRef, asset: AssetRef) -> SendReceipt:
-        return await self._send(target, "send_file", asset)
+    async def send_file(
+        self, target: ConversationRef, asset: AssetRef, *, _source: Activation | None = None
+    ) -> SendReceipt:
+        return await self._send(target, "send_file", asset, source=_source)
 
-    async def _notify(self, event):
+    async def _notify(self, event, source):
+        if source is not None:
+            event = event.model_copy(
+                update={"origin": EventOrigin(component=source.plugin_id, activation_id=source.id)}
+            )
         try:
-            await self.events.publish(event)
+            await self.events.publish(event, source=source)
         except Exception:
             # Notification failure must not change the result of the platform operation.
             log.exception("send notification could not be queued: %s", event.event_type)
 
-    async def _send(self, target, operation, content, **options) -> SendReceipt:
+    async def _send(self, target, operation, content, *, source=None, **options) -> SendReceipt:
         adapter = self._adapter(target)
         send = getattr(adapter, operation, None)
         if send is None:
@@ -96,16 +108,43 @@ class MessageSender:
             await self._notify(
                 MessageSendFailed(
                     connection=adapter.connection, request_id=request_id, target=target, error=failure
-                )
+                ),
+                source,
             )
             raise
         event = (
-            MessageSent(connection=adapter.connection, receipt=receipt, content=content)
+            MessageSent(
+                connection=adapter.connection,
+                receipt=receipt,
+                content=content,
+                source_plugin_id=source.plugin_id if source else None,
+            )
             if operation == "send"
             else FileSent(connection=adapter.connection, conversation=target, asset=content, receipt=receipt)
         )
-        await self._notify(event)
+        await self._notify(event, source)
         return receipt
+
+
+class PluginMessageSender:
+    """Bind send provenance while routing every operation through the shared sender."""
+
+    def __init__(self, sender: MessageSender, owner: Activation):
+        self._sender, self._owner = sender, owner
+
+    def get_connection(self, connection_id: str) -> ConnectionRef | None:
+        return self._sender.get_connection(connection_id)
+
+    async def fetch(self, ref: MessageRef):
+        return await self._sender.fetch(ref)
+
+    async def send(
+        self, target: ConversationRef, content: MessageChain | str, *, reply_to=None
+    ) -> SendReceipt:
+        return await self._sender.send(target, content, reply_to=reply_to, _source=self._owner)
+
+    async def send_file(self, target: ConversationRef, asset: AssetRef) -> SendReceipt:
+        return await self._sender.send_file(target, asset, _source=self._owner)
 
 
 class AssetReader:

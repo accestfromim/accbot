@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from ..events import Event, EventOrigin
 from ..lifecycle import Activation
+from ..messages import PluginMessageSender
 
 if TYPE_CHECKING:
     from .manager import PluginManager
@@ -34,7 +35,8 @@ class PluginContext:
         self, runtime, manager: "PluginManager", owner: Activation, data_dir: Path, *, prompt_bundle=None
     ):
         self.runtime, self.plugins, self.owner, self.data_dir = runtime, manager, owner, data_dir
-        self.models, self.messages, self.tools = runtime.models, runtime.messages, runtime.tools
+        self.models, self.tools = runtime.models, runtime.tools
+        self.messages = PluginMessageSender(runtime.messages, owner)
         self.personas = runtime.personas
         self.prompts = runtime.prompts
         self._prompt_bundle = prompt_bundle

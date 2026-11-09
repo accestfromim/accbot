@@ -10,7 +10,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from uuid import uuid4
 
-from accbot import ConversationRef, MessageChain, MessageReceived, ModelItem
+from accbot import ChatMessage, ConversationRef, MessageChain, MessageReceived, MessageSent, ModelItem
 
 from .context import ChatContext, Entry, MemoryContext, cost
 from .events import SummarizeMemory
@@ -97,6 +97,27 @@ class Sessions:
         finally:
             channel.worker_id = None
 
+    def observe(self, channel: Channel, message: ChatMessage, now: float) -> Entry | None:
+        if message.ref.id in channel.seen:
+            return None
+        channel.seen[message.ref.id] = None
+        if len(channel.seen) > 2048:
+            channel.seen.popitem(last=False)
+        entry = Entry(message, now)
+        channel.recent.append(entry)
+        return entry
+
+    def observe_sent(self, event: MessageSent):
+        if self.closed or event.source_plugin_id == self.ctx.plugin_id:
+            return
+        message = event.message
+        if message is None or not self.plugin.allowed_conversation(message.conversation):
+            return
+        channel = self.channel(message.conversation)
+        if self.observe(channel, message, self.clock()) is not None and channel.session:
+            channel.session.record.waiting.append(ModelItem.from_message(message))
+            channel.store.journal(channel.records)
+
     async def accept(self, event: MessageReceived, *, tools):
         message = event.message
         if self.closed or message.is_self or not self.plugin.allowed(message):
@@ -107,18 +128,14 @@ class Sessions:
             )
             return
         channel = self.channel(message.conversation)
-        if message.ref.id in channel.seen:
+        now = self.clock()
+        busy = len(channel.recent) == 15 and now - channel.recent[0].arrived <= self.config.busy_seconds
+        entry = self.observe(channel, message, now)
+        if entry is None:
             event_log.debug("AI message ignored: event=%s reason=duplicate", event.event_id)
             return
-        channel.seen[message.ref.id] = None
-        if len(channel.seen) > 2048:
-            channel.seen.popitem(last=False)
-        now = self.clock()
         if channel.session and now - channel.session.last_wake >= self.config.idle_seconds:
             self.seal(channel)
-        entry = Entry(message, now)
-        busy = len(channel.recent) == 15 and now - channel.recent[0].arrived <= self.config.busy_seconds
-        channel.recent.append(entry)
         owner = self.plugin.is_owner(message)
         direct = message.conversation.kind == "direct"
         mention = any(p.type == "mention" and p.user == event.connection.bot for p in message.content)
@@ -163,7 +180,9 @@ class Sessions:
         if channel.session is None:
             record = Record(id=uuid4().hex, model=self.config.default_model, owner=owner)
             record.waiting = [
-                ModelItem.from_message(e.message) for e in ([entry] if direct else channel.recent)
+                ModelItem.from_message(e.message)
+                for e in channel.recent
+                if not direct or e is entry or e.message.is_self
             ]
             channel.session = Session(record, now)
             if not (direct and not owner):

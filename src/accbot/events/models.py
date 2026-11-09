@@ -74,6 +74,20 @@ class MessageSent(PlatformEvent):
     event_type = "accbot.message.sent"
     receipt: SendReceipt
     content: MessageChain
+    source_plugin_id: str | None = None
+
+    @property
+    def message(self) -> ChatMessage | None:
+        """Represent one logical send once, even when the adapter returns multiple message IDs."""
+        if not self.receipt.messages:
+            return None
+        return ChatMessage(
+            ref=self.receipt.messages[0],
+            sender=User(ref=self.connection.bot),
+            content=self.content,
+            sent_at=self.receipt.accepted_at,
+            is_self=True,
+        )
 
     @property
     def dispatch_key(self):

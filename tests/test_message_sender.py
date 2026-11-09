@@ -4,7 +4,8 @@ import pytest
 
 from accbot import AssetRef, ConnectionRef, ConversationRef, FrameworkError, MessageChain, MessageRef, UserRef
 from accbot.events import EventBus, FileSent, MessageSendFailed, MessageSent
-from accbot.messages import MessageSender
+from accbot.lifecycle import Activation
+from accbot.messages import MessageSender, PluginMessageSender
 from accbot.types import SendReceipt
 
 
@@ -50,9 +51,85 @@ def test_sends_route_through_manager_and_preserve_payload_and_receipts(operation
             assert notices[0].connection == second.connection
             assert notices[0].receipt == receipt
             assert (notices[0].content if operation == "send" else notices[0].asset) == content
+            if operation == "send":
+                assert notices[0].source_plugin_id is None
             with pytest.raises(FrameworkError):
                 await getattr(sender, operation)(target.model_copy(update={"scope": "other"}), content)
             assert len(second.calls) == 1
+        finally:
+            await bus.close()
+
+    asyncio.run(run())
+
+
+def test_plugin_senders_keep_separate_origins_and_share_current_routing():
+    async def run():
+        bus, owner, other = EventBus(), Activation("first"), Activation("second")
+        owner.activate()
+        other.activate()
+        sender = MessageSender(bus)
+        first, second = PluginMessageSender(sender, owner), PluginMessageSender(sender, other)
+        adapter = Adapter("main")
+        # Bound plugin services must see replacements of the manager's adapter mapping.
+        sender.adapters = {"main": adapter}
+        target = ConversationRef(connection_id="main", platform="test", scope="scope", id="group")
+        notices, failures, files = [], [], []
+        bus.subscribe(MessageSent, notices.append)
+        bus.subscribe(MessageSendFailed, failures.append)
+        bus.subscribe(FileSent, files.append)
+        try:
+            assert first.get_connection("main") == adapter.connection
+            await asyncio.gather(first.send(target, "one"), second.send(target, "two"))
+            await first.send_file(target, AssetRef(path="document.txt"))
+            adapter.error = OSError("send failed")
+            with pytest.raises(OSError):
+                await second.send(target, "failed")
+            await bus.drain()
+            assert [e.source_plugin_id for e in notices] == ["first", "second"]
+            for event, source in zip(notices, (owner, other)):
+                assert event.origin.component == source.plugin_id
+                assert event.origin.activation_id == source.id
+                restored = bus.decode(event.to_dict())
+                assert restored.source_plugin_id == source.plugin_id
+                assert restored.message.is_self
+                assert restored.message.sender.ref == adapter.connection.bot
+                assert restored.message.content == event.content
+                assert restored.message.sent_at == event.receipt.accepted_at
+                assert restored.message.ref == event.receipt.messages[0]
+            assert files[0].origin.activation_id == owner.id
+            assert failures[0].origin.activation_id == other.id
+            assert len(notices) == 2
+            assert (
+                notices[0]
+                .model_copy(update={"receipt": SendReceipt(request_id="empty", messages=())})
+                .message
+                is None
+            )
+        finally:
+            await bus.close()
+
+    asyncio.run(run())
+
+
+def test_retired_sender_can_finish_without_delivering_into_new_plugin_activation():
+    async def run():
+        bus, sender_owner, observer = EventBus(), Activation("sender"), Activation("observer")
+        sender_owner.activate()
+        observer.activate()
+        sender = MessageSender(bus)
+        sender.add_adapter(Adapter("main"))
+        bound = PluginMessageSender(sender, sender_owner)
+        target = ConversationRef(connection_id="main", platform="test", scope="scope", id="group")
+        diagnostics, received = [], []
+        bus.subscribe(MessageSent, diagnostics.append)
+        bus.subscribe(MessageSent, received.append, owner=observer)
+        sender_owner.retire()
+        try:
+            # An already accepted background tool may still send after its plugin is unloaded.
+            await bound.send(target, "completed")
+            await bus.drain()
+            assert not received
+            assert len(diagnostics) == 1 and diagnostics[0].origin.activation_id == sender_owner.id
         finally:
             await bus.close()
 
