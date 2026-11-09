@@ -6,8 +6,9 @@ _SLOTS = re.compile(r"<persona>|<plugins_insert_prompt>|<tools_insert_prompt>")
 
 
 class PromptRegistry:
-    def __init__(self, cards, personas, tools):
+    def __init__(self, cards, personas, tools, *, loader=None):
         self.personas, self.tools = personas, tools
+        self._loader = loader
         self._plugins = {}
         self.replace(cards)
 
@@ -18,9 +19,15 @@ class PromptRegistry:
         self._cards = {c.id: c for c in cards}
 
     def list(self):
+        if self._loader is not None:
+            try:
+                self.replace(self._loader())
+            except (OSError, ValueError) as exc:
+                raise FrameworkError(ErrorCode.CONFIGURATION, "系统提示词卡文件无效，请检查配置目录") from exc
         return tuple(self._cards.values())
 
     def get(self, card_id):
+        self.list()
         try:
             return self._cards[card_id]
         except KeyError:

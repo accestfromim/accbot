@@ -62,7 +62,7 @@ plugins/
 
 两个 AI 插件均默认未激活，详情见 [AI 插件说明](ai-plugins.md)。`plugins/ai/` 纳入版本控制，其他本地插件默认忽略。测试用插件位于 `tests/fixtures/demo/`，不参与运行时插件发现。
 
-人格卡由框架统一保存于 `.accbot/config/personas/`。系统提示词卡保存在 `.accbot/config/prompts/`。插件通过 `ctx.personas` 和 `ctx.prompts` 共享读取，并在 `model.generate` 中指定使用的 ID；管理页面提供编辑与导出。
+人格卡由框架统一保存于 `.accbot/config/personas/`。系统提示词卡保存在 `.accbot/config/prompts/`。插件通过 `ctx.personas` 和 `ctx.prompts` 现场读取文件，并在 `model.generate` 中指定使用的 ID；管理页面提供编辑与导出。直接修改运行目录中的卡片在下一次模型调用生效，无需重启；模型、适配器或插件激活配置的保存不会覆盖这些编辑。
 
 插件补充和各工具说明随插件包存放，激活时读取快照：
 

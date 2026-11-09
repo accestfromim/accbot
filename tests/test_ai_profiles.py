@@ -377,7 +377,7 @@ def test_summary_profile_tools_use_real_provider_codecs(setup_ai, protocol):
     asyncio.run(run())
 
 
-def test_summary_tool_loop_limit_retains_pending_group_memory(setup_ai):
+def test_summary_tool_loop_can_exceed_chat_limit(setup_ai):
     async def run():
         runtime, plugin, model = await setup_ai(max_tool_rounds=2)
         count = 0
@@ -385,7 +385,10 @@ def test_summary_tool_loop_limit_retains_pending_group_memory(setup_ai):
         async def respond(items, tools, options):
             nonlocal count
             count += 1
-            return calls(update(200, "画像已保存", call_id=str(count)))
+            if count <= 35:
+                revision = plugin.agent.profiles.read(user(200)).revision
+                return calls(update(200, "画像已保存", revision, call_id=str(count)))
+            return final_memory()
 
         model.summary_responder = respond
         try:
@@ -393,8 +396,9 @@ def test_summary_tool_loop_limit_retains_pending_group_memory(setup_ai):
             channel = next(iter(plugin.sessions.channels.values()))
             plugin.sessions.seal(channel)
             await runtime.jobs.drain()
-            assert count == 2 and channel.records and channel.retry_ticket
-            assert channel.store.pending_path.exists() and not channel.store.memory_path.exists()
+            assert count == 36 and not channel.records and channel.retry_ticket is None
+            assert not channel.store.pending_path.exists()
+            assert channel.store.load().summary == MEMORY["summary"]
             assert plugin.agent.profiles.read(user(200)).content == "画像已保存"
         finally:
             await runtime.close()

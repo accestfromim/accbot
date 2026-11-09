@@ -30,7 +30,9 @@ def create_router(runtime):
 
     @router.get("/settings")
     async def settings():
-        return runtime.settings.model_dump(mode="json")
+        return runtime.settings.model_copy(
+            update={"personas": runtime.personas.list(), "system_prompts": runtime.prompts.list()}
+        ).model_dump(mode="json")
 
     @router.get("/secrets")
     async def secret_status():

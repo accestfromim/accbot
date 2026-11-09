@@ -22,7 +22,8 @@ def default_persona() -> PersonaCard:
 
 
 class PersonaRegistry:
-    def __init__(self, cards=()):
+    def __init__(self, cards=(), *, loader=None):
+        self._loader = loader
         self.replace(cards)
 
     def replace(self, cards):
@@ -32,9 +33,15 @@ class PersonaRegistry:
         self._cards = {card.id: card for card in cards}
 
     def list(self) -> tuple[PersonaCard, ...]:
+        if self._loader is not None:
+            try:
+                self.replace(self._loader())
+            except (OSError, ValueError) as exc:
+                raise FrameworkError(ErrorCode.CONFIGURATION, "人格卡文件无效，请检查配置目录") from exc
         return tuple(self._cards.values())
 
     def get(self, card_id: str) -> PersonaCard:
+        self.list()
         try:
             return self._cards[card_id]
         except KeyError:

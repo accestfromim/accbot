@@ -25,6 +25,8 @@ class Runtime:
     def __init__(self, directory: str | Path = ".accbot", *, http: httpx.AsyncClient | None = None):
         self.store = ConfigStore(Path(directory).resolve())
         self.settings = self.store.load()
+        if not self.store.path.exists():
+            self.store.save(self.settings)
         self.http = http or httpx.AsyncClient()
         self._owns_http = http is None
         self.events = EventBus(self.settings.event_capacity)
@@ -33,8 +35,10 @@ class Runtime:
         self.timers = TimerManager(self.events)
         self.messages = MessageSender(self.events)
         self.assets = AssetReader(self.http, self._resolve_asset)
-        self.personas = PersonaRegistry(self.settings.personas)
-        self.prompts = PromptRegistry(self.settings.system_prompts, self.personas, self.tools)
+        self.personas = PersonaRegistry(self.settings.personas, loader=self.store.read_personas)
+        self.prompts = PromptRegistry(
+            self.settings.system_prompts, self.personas, self.tools, loader=self.store.read_prompts
+        )
         self.models = ModelRegistry(
             self.settings.models, self.http, self.store.get_secret, prompts=self.prompts
         )
@@ -76,7 +80,7 @@ class Runtime:
         self.settings = self.settings.model_copy(
             update={"active_plugins": tuple(sorted(self.plugins.active))}
         )
-        self.store.save(self.settings)
+        self.store.save(self.settings, include_prompt_cards=False)
 
     async def set_active(self, selected):
         async with self.management_lock:
@@ -106,7 +110,7 @@ class Runtime:
         if len({card.id for card in cards}) != len(cards):
             raise FrameworkError(ErrorCode.CONFLICT, "模型卡 ID 重复")
         updated = self.settings.model_copy(update={"models": tuple(cards)})
-        self.store.save(updated)
+        self.store.save(updated, include_prompt_cards=False)
         self.models.replace(cards)
         self.settings = updated
 
@@ -119,7 +123,7 @@ class Runtime:
     def _replace_personas(self, cards):
         registry = PersonaRegistry(cards)
         updated = self.settings.model_copy(update={"personas": registry.list()})
-        self.store.save(updated)
+        self.store.save_personas(registry.list())
         self.personas.replace(registry.list())
         self.settings = updated
 
@@ -132,7 +136,7 @@ class Runtime:
         if len({card.id for card in cards}) != len(cards):
             raise FrameworkError(ErrorCode.CONFLICT, "系统提示词卡 ID 重复")
         updated = self.settings.model_copy(update={"system_prompts": cards})
-        self.store.save(updated)
+        self.store.save_prompts(cards)
         self.prompts.replace(cards)
         self.settings = updated
 
@@ -157,7 +161,9 @@ class Runtime:
                 if old and old.config == config
                 else OneBotAdapter(config, self.events, self.http, self.store.get_secret)
             )
-        self.store.save(self.settings.model_copy(update={"onebot": tuple(configs)}))
+        self.store.save(
+            self.settings.model_copy(update={"onebot": tuple(configs)}), include_prompt_cards=False
+        )
         self.messages.adapters = updated
         for key, adapter in previous.items():
             if updated.get(key) is not adapter:

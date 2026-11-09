@@ -60,9 +60,9 @@ class ConfigStore:
                 data["models"] = self._read_cards(self.models_dir, ModelCard)
                 data["onebot"] = self._read_cards(self.onebot_dir, OneBotConfig)
                 if self.personas_dir.exists():
-                    data["personas"] = self._read_cards(self.personas_dir, PersonaCard)
+                    data["personas"] = self.read_personas()
                 if self.prompts_dir.exists():
-                    data["system_prompts"] = self._read_prompts()
+                    data["system_prompts"] = self.read_prompts()
                 else:
                     self._migrate_prompts(data)
                 settings = (
@@ -121,7 +121,13 @@ class ConfigStore:
             cards.append(card)
         data["system_prompts"] = cards
 
-    def _read_prompts(self):
+    def read_personas(self):
+        return self._read_cards(self.personas_dir, PersonaCard)
+
+    def save_personas(self, cards):
+        self._write_cards(self.personas_dir, cards)
+
+    def read_prompts(self):
         result = []
         for metadata in sorted(self.prompts_dir.glob("*/metadata.json")):
             data = json.loads(metadata.read_text("utf-8"))
@@ -132,7 +138,7 @@ class ConfigStore:
             result.append(card)
         return result
 
-    def _write_prompts(self, cards):
+    def save_prompts(self, cards):
         self.prompts_dir.mkdir(parents=True, exist_ok=True)
         keep = {card.id for card in cards}
         for card in cards:
@@ -165,10 +171,11 @@ class ConfigStore:
             if existing.name not in filenames:
                 existing.unlink()
 
-    def save(self, settings: Settings):
+    def save(self, settings: Settings, *, include_prompt_cards=True):
         self._write_cards(self.models_dir, settings.models)
-        self._write_cards(self.personas_dir, settings.personas)
-        self._write_prompts(settings.system_prompts)
+        if include_prompt_cards:
+            self.save_personas(settings.personas)
+            self.save_prompts(settings.system_prompts)
         self._write_cards(self.onebot_dir, settings.onebot)
         atomic_json(self.config_dir / "plugins.json", {"active": list(settings.active_plugins)})
         if self._secrets or self._legacy_secrets.exists():

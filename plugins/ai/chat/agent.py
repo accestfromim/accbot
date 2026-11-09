@@ -154,7 +154,7 @@ class Agent:
             options["response_format"] = {"type": "json_object"}
         else:
             options["text"] = {"format": {"type": "json_object"}}
-        for _ in range(config.max_tool_rounds):
+        while True:
             if not running():
                 raise asyncio.CancelledError
             selected = self.context(
@@ -188,4 +188,3 @@ class Agent:
                     else ToolResult.failure(call.id, "记忆整理阶段只允许使用用户画像工具")
                 )
                 trace.append(ModelItem.from_tool_result(output))
-        raise ValueError("记忆整理工具调用次数已达上限")
