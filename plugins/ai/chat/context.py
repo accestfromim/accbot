@@ -21,6 +21,10 @@ class MemoryContext(ToolContext):
     profile_users: tuple[UserRef, ...] = ()
 
 
+class ContextBudgetExceeded(ValueError):
+    """The requested context does not fit; history may be folded before retrying."""
+
+
 @dataclass
 class Entry:
     message: ChatMessage

@@ -12,7 +12,7 @@ from uuid import uuid4
 
 from accbot import ChatMessage, ConversationRef, MessageChain, MessageReceived, MessageSent, ModelItem
 
-from .context import ChatContext, Entry, MemoryContext, cost
+from .context import ChatContext, ContextBudgetExceeded, Entry, MemoryContext, cost
 from .events import SummarizeMemory
 from .identity import MemoryKey
 from .memory import Record, Store, empty_memory
@@ -271,32 +271,48 @@ class Sessions:
         return cost(items) >= budget - self.config.context_budget // 20
 
     async def request_compaction(self, channel, record, count):
+        last = record.turns[count - 1]
         event = SummarizeMemory(
             memory_key=channel.store.key, ticket=record.id, reason="budget", turn_count=count
         )
         receipt = await self.ctx.publish(event)
         await receipt.wait()
-        if record.id == event.ticket:
-            raise ValueError("记忆整理失败，历史已保留")
+        if any(turn is last for turn in record.turns):
+            raise ValueError("记忆整理失败，未整理的历史已保留")
 
     async def compact(self, channel, event):
         record = next((r for r in channel.records if r.id == event.ticket), None)
         if record is None or not 0 < event.turn_count <= len(record.turns):
             return
-        snapshot = record.model_copy(update={"turns": record.turns[: event.turn_count], "waiting": []})
-        memory = await self.agent.summarize(
-            snapshot,
-            channel.store.load(),
-            self.plugin.memory_tools(),
-            self.config,
-            MemoryContext(conversation=channel.conversation, correlation_id=event.event_id),
-            lambda: not self.closed and self.ctx.owner.active,
-        )
-        # A prefix commit must never mark the entire pending record as committed.
-        channel.store.save(memory, f"{record.id}:budget")
-        del record.turns[: event.turn_count]
-        record.id = uuid4().hex
-        channel.store.journal(channel.records)
+        await self.fold(channel, record, event.turn_count, event.event_id)
+
+    async def fold(self, channel, record, count, correlation_id):
+        """Commit ordered prefixes, shrinking a batch when its summary tool loop cannot fit."""
+        remaining = size = count
+        while remaining:
+            snapshot = record.model_copy(update={"turns": record.turns[:size], "waiting": []})
+            try:
+                memory = await self.agent.summarize(
+                    snapshot,
+                    channel.store.load(),
+                    self.plugin.memory_tools(),
+                    self.config,
+                    MemoryContext(conversation=channel.conversation, correlation_id=correlation_id),
+                    lambda: not self.closed and self.ctx.owner.active,
+                )
+            except ContextBudgetExceeded:
+                if size == 1:
+                    raise  # An indivisible turn or mandatory background cannot be silently discarded.
+                size = max(1, size // 2)
+                continue
+            # Only the final prefix of a sealed record can commit the entire record ID.
+            commit_id = record.id if record.sealed and size == len(record.turns) else f"{record.id}:budget"
+            channel.store.save(memory, commit_id)
+            del record.turns[:size]
+            record.id = uuid4().hex
+            channel.store.journal(channel.records)
+            remaining -= size
+            size = remaining
 
     def seal(self, channel):
         self.cancel(channel, "idle")
@@ -320,15 +336,7 @@ class Sessions:
             record = channel.records[0]
             try:
                 if record.turns and not channel.store.committed(record.id):
-                    memory = await self.agent.summarize(
-                        record,
-                        channel.store.load(),
-                        self.plugin.memory_tools(),
-                        self.config,
-                        MemoryContext(conversation=channel.conversation, correlation_id=record.id),
-                        lambda: not self.closed and self.ctx.owner.active,
-                    )
-                    channel.store.save(memory, record.id)
+                    await self.fold(channel, record, len(record.turns), record.id)
                 channel.records.pop(0)
                 channel.store.journal(channel.records)
                 self.cancel(channel, "retry")

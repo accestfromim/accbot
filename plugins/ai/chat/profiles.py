@@ -63,7 +63,6 @@ class Profiles:
             return {
                 "updated": False,
                 "conflict": True,
-                "content": current.content,
                 "revision": current.revision,
             }
         # No await between comparison and replacement: concurrent conversations cannot

@@ -5,7 +5,7 @@ from pathlib import Path
 
 from accbot import AssetRef, ModelItem, ModelPart, ToolCall, ToolDefinition, ToolResult, UserRef
 
-from .context import ChatContext, MemoryContext, close_tool_calls, cost
+from .context import ChatContext, ContextBudgetExceeded, MemoryContext, close_tool_calls, cost
 from .profiles import Profiles, participants
 
 
@@ -46,7 +46,7 @@ class Agent:
         items = [item for turn in history for item in turn] + list(current)
         items = self.prefix(memory, owner, bot, self.profiles.items(items, cache)) + items
         if budget is not None and cost(items) > budget:
-            raise ValueError("完整上下文超过预算，请缩短消息或提高预算；历史未被裁剪")
+            raise ContextBudgetExceeded("完整上下文超过预算，请缩短消息或提高预算；历史未被裁剪")
         return items
 
     def budget(self, config, prompt_id, persona_id, tools):
@@ -188,3 +188,6 @@ class Agent:
                     else ToolResult.failure(call.id, "记忆整理阶段只允许使用用户画像工具")
                 )
                 trace.append(ModelItem.from_tool_result(output))
+                if call.name == "ai.chat.update_user_profile" and output.ok and output.value.get("conflict"):
+                    # Supply the latest portrait once as background, not again inside a tool result.
+                    profile_cache.clear()

@@ -178,7 +178,7 @@ def test_summary_loops_through_profile_tools_before_committing_group_memory(setu
     asyncio.run(run())
 
 
-def test_concurrent_profile_updates_return_latest_content_instead_of_overwriting(setup_ai):
+def test_concurrent_profile_updates_return_compact_receipts_without_overwriting(setup_ai):
     async def run():
         runtime, plugin, _ = await setup_ai()
         try:
@@ -191,12 +191,47 @@ def test_concurrent_profile_updates_return_latest_content_instead_of_overwriting
             success = next(r.value for r in results if r.value["updated"])
             conflict = next(r.value for r in results if not r.value["updated"])
             assert conflict["conflict"] and conflict["revision"] == success["revision"]
-            assert conflict["content"] == plugin.agent.profiles.read(user(200)).content
+            assert all("content" not in r.value for r in results)
             merged = await runtime.tools.execute(
                 update(200, "来自群 A 与群 B", conflict["revision"]), context
             )
             assert merged.value["updated"]
             assert plugin.agent.profiles.read(user(200)).content == "来自群 A 与群 B"
+        finally:
+            await runtime.close()
+
+    asyncio.run(run())
+
+
+def test_profile_conflict_refreshes_summary_background_without_echo(setup_ai):
+    async def run():
+        runtime, plugin, model = await setup_ai()
+        profiles = plugin.agent.profiles
+        original = profiles.update(user(200), "OLD_PROFILE", "")
+        latest = "LATEST_PROFILE " + "x" * 6000
+        step = 0
+
+        async def respond(items, tools, options):
+            nonlocal step
+            step += 1
+            if step == 1:
+                profiles.update(user(200), latest, original["revision"])
+                return calls(update(200, "my update", original["revision"]))
+            output = next(i.output["value"] for i in items if i.kind == "tool_result")
+            assert output["conflict"] and "content" not in output
+            backgrounds = [i.content[0].text for i in items if i.role == "system"]
+            assert sum(latest in text for text in backgrounds) == 1
+            assert not any("OLD_PROFILE" in text for text in backgrounds)
+            assert profiles.read(user(200)).content == latest
+            return final_memory()
+
+        model.summary_responder = respond
+        try:
+            await deliver(runtime, event())
+            channel = next(iter(plugin.sessions.channels.values()))
+            plugin.sessions.seal(channel)
+            await runtime.jobs.drain()
+            assert step == 2 and not channel.records
         finally:
             await runtime.close()
 
