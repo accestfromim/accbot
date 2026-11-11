@@ -91,13 +91,13 @@ class ModelItem(FrozenModel):
         )
 
     @classmethod
-    def tool_result(cls, call_id, output):
-        return cls(kind="tool_result", call_id=call_id, output=output)
+    def tool_result(cls, call_id, output=None, *, content: tuple[ModelPart, ...] = ()):
+        return cls(kind="tool_result", call_id=call_id, output=output, content=content)
 
     @classmethod
-    def from_tool_result(cls, result: ToolResult) -> "ModelItem":
-        """Convert an execution result to JSON content only at the model-context boundary."""
-        return cls.tool_result(result.call_id, result.model_dump(mode="json"))
+    def from_tool_result(cls, result: ToolResult, *, content: tuple[ModelPart, ...] = ()) -> "ModelItem":
+        """Keep the execution receipt and optional media together under the same call ID."""
+        return cls.tool_result(result.call_id, result.model_dump(mode="json"), content=content)
 
 
 class GenerationResult(FrozenModel):

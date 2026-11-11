@@ -64,6 +64,7 @@ accbot 是面向群体聊天的 Python AI 机器人框架。多个参与者、�
 - 模型管理器按 ID 返回可复用的无会话客户端。上下文和工具均由调用插件传入。
 - generate 同时接受 ModelItem 序列和原生消息数组的 JSON 字符串。字符串模式绕过内部消息渲染及全部提示词注入，忽略 system_prompt_id/persona_id；继续使用模型卡的端点、凭据、工具 Schema 和返回解析。不把文本中的角色标签猜测为协议字段。
 - 支持 OpenAI 兼容 Chat Completions 与 Responses 原生工具调用。供应商编码和解析属于框架模型协议实现；其他协议显式添加，不猜测解析模型文本。
+- ModelItem 工具结果可通过 content 携带 ModelPart 图片、文件和文本，与 call_id 绑定；output 保留执行回执。两种协议统一在本批连续工具结果之后插入一条补充 user 消息，标注各调用 ID 和资料用途，不在尚未返回的并行工具之间插入，也不把图片反复移动到后续轮次末尾。插件不读取模型卡决定图片放置方式。
 - GenerationResult 保留有序输出项目、工具调用关联、用量、结束原因及供应商延续状态。模型异常向调用方抛出。
 - 框架通过 `accbot.models.count_text_tokens` 和 `count_tokens` 提供离线预算计算，内置 DeepSeek V4.1 tokenizer，惰性加载且缓存有界。计入渲染后的元数据、引用、工具 Schema、工具结果及供应商续接内容；原生内容只计一次。文本按词表计数，消息封装为估算开销，每个图片或文件暂按 8192 token 预留，不下载或对 Base64 分词。调用方负责把展开提示词纳入输入及预留输出；实际供应商用量仍以返回的 usage 为准。
 - 当前使用完整响应；流式模型输出作为后续扩展，不伪造流式协议。
@@ -142,6 +143,7 @@ unload 是逻辑卸载；旧任务持有旧模块和对象直到完成。重新�
 | Token 预算计算 | [模型上下文](model-context.md#token-预算计算)，`models/tokens.py`、`models/tokenizer/`，[DeepSeek tokenizer](https://github.com/deepseek-ai/deepseek-recipe/blob/main/docs/tokenizer.md) |
 | 记忆内容取舍参考 | [OpenClaw 长期记忆整理](https://docs.openclaw.ai/concepts/memory-architecture)、[Letta 记忆块](https://docs.letta.com/v1-sdk/memory/memory-blocks)；不引入这些项目的存储或调度机制 |
 | 模型上下文与协议编码 | [模型上下文](model-context.md)，`models/` |
+| 工具媒体与固定位置补充消息 | [工具返回的图片与文件](model-context.md#工具返回的图片与文件)，`models/types.py`、`models/codecs.py`、`plugins/ai/chat/agent.py`；[Chat 消息类型](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create) |
 | 模板、人格现场读取与提示词补充 | [系统提示词](system-prompts.md)，`prompts/`、`personas/`、`config/store.py`、`plugins/prompts.py` |
 | 配置、资源与业务文件 | [目录约定](directories.md)，`config/`、`personas/` |
 | 插件配置页面 | [前端接口](plugin-frontend.md)，`plugins/frontend.py`、`web/routes/plugin_ui.py`、`frontend/js/plugin-panel.js` |
@@ -174,6 +176,7 @@ unload 是逻辑卸载；旧任务持有旧模块和对象直到完成。重新�
 - [x] 模型请求超时默认 300 秒；前端可新增和编辑，API 校验并持久化，模型调用与协议检测均使用配置值。
 - [x] 群记忆接受完整 Markdown，覆盖保存正文和提交标记；读取已有结构化正文时保留各项信息，空或过大输出不覆盖旧记忆。
 - [x] Chat/Responses 共用内部类型，保留工具关联、多模态与供应商续接项目。
+- [x] 工具媒体统一随对应结果批次补充，来源和用途明确；并行调用的工具回执保持连续，追加后续轮次不移动已插入的图片。示例插件仅在当轮回填图片，不写入 pending.json 或下一轮历史。
 - [x] 相邻用户消息合并保留身份与引用，原生 JSON 输入绕过渲染及卡片注入。
 - [x] 卡片模板完全由用户控制，插件与工具补充按当前激活和工具集合注入。
 - [x] 系统提示词和人格的磁盘编辑在下一次模型调用生效，管理读取同步；无效文件不回退缓存，其他配置保存不覆盖卡片，插件补充维持激活快照。

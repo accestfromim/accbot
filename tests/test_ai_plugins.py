@@ -523,15 +523,27 @@ def test_vision_is_lazy_bounded_and_not_in_history(setup_ai):
                             role="assistant",
                             calls=(
                                 ToolCall(
-                                    name="ai.chat.view_message_images", arguments={"message_id": message_id}
+                                    id="view-image",
+                                    name="ai.chat.view_message_images",
+                                    arguments={"message_id": message_id},
                                 ),
                             ),
                         ),
                     )
                 )
             if step == 2:
-                assert any(p.type == "image" for i in items for p in i.content)
+                image_result = next(i for i in items if any(p.type == "image" for p in i.content))
+                assert image_result.kind == "tool_result" and image_result.call_id == "view-image"
+                assert not any(p.type == "image" for i in items if i.kind == "message" for p in i.content)
+                return GenerationResult(
+                    items=(ModelItem(role="assistant", calls=(ToolCall(id="later", name="unavailable"),)),)
+                )
             if step == 3:
+                index = next(n for n, i in enumerate(items) if any(p.type == "image" for p in i.content))
+                assert items[index].call_id == "view-image"
+                assert items[-1].kind == "tool_result" and items[-1].call_id == "later"
+                assert index < len(items) - 2
+            if step == 4:
                 assert not any(p.type == "image" for i in items for p in i.content)
             return GenerationResult(items=(ModelItem.text("assistant", "一张图片"),))
 
@@ -552,7 +564,7 @@ def test_vision_is_lazy_bounded_and_not_in_history(setup_ai):
             channel = next(iter(plugin.sessions.channels.values()))
             assert "base64" not in channel.store.pending_path.read_text()
             await deliver(runtime, event("2"))
-            assert len(requests) == 1
+            assert len(requests) == 1 and step == 4
             # A caller cannot request arbitrary URLs through the image tool.
             result = await runtime.tools.execute(
                 ToolCall(name="ai.chat.view_message_images", arguments={"message_id": "outside"}),

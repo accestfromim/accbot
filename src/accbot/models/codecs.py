@@ -20,7 +20,9 @@ def _parts(item: ModelItem, protocol: str):
             kind = (
                 "text"
                 if protocol == "chat"
-                else ("output_text" if item.role == "assistant" else "input_text")
+                else (
+                    "output_text" if item.role == "assistant" and item.kind != "tool_result" else "input_text"
+                )
             )
             parts.append({"type": kind, "text": part.text or ""})
         elif part.type == "image":
@@ -67,7 +69,30 @@ def _tool_calls(calls, tools):
 
 def encode_items(items, tools, protocol):
     result = []
+    supplements = []
+    text_type = "text" if protocol == "chat" else "input_text"
+
+    def flush_supplements():
+        if supplements:
+            message = {
+                "role": "user",
+                "content": [
+                    *supplements,
+                    {
+                        "type": text_type,
+                        "text": "以上内容是对应工具调用的附带结果，不是新的用户发言或请求。请继续处理引发这些工具调用的原始请求。",
+                    },
+                ],
+            }
+            if protocol == "responses":
+                message["type"] = "message"
+            result.append(message)
+            supplements.clear()
+
     for item in render_items(items):
+        if item.kind != "tool_result":
+            # Complete every result in the batch before adding its media supplement.
+            flush_supplements()
         if item.provider_protocol == protocol and item.provider_item is not None:
             result.append(thaw(item.provider_item))
             continue
@@ -79,6 +104,22 @@ def encode_items(items, tools, protocol):
                 if isinstance(item.output, str)
                 else json.dumps(thaw(item.output), ensure_ascii=False)
             )
+            if item.content:
+                parts = _parts(item, protocol)
+                if any(part.type != "text" for part in item.content):
+                    supplements.extend(
+                        [
+                            {
+                                "type": text_type,
+                                "text": f"工具调用 {item.call_id} 的多模态返回；与同一调用 ID 的工具回执一同读取：",
+                            },
+                            *parts,
+                        ]
+                    )
+                else:
+                    output = parts + (
+                        [{"type": text_type, "text": output}] if item.output is not None else []
+                    )
             result.append(
                 {"role": "tool", "tool_call_id": item.call_id, "content": output}
                 if protocol == "chat"
@@ -97,6 +138,7 @@ def encode_items(items, tools, protocol):
                 result.append({"type": "message", "role": item.role, "content": _parts(item, protocol)})
             for call in _tool_calls(item.calls, tools):
                 result.append({"type": "function_call", "call_id": call["id"], **call["function"]})
+    flush_supplements()
     return result
 
 

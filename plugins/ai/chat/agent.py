@@ -67,7 +67,7 @@ class Agent:
         running: Callable[[], bool],
     ) -> str | None:
         allowed = {t.id for t in tools}
-        ephemeral = []
+        ephemeral: dict[str, ModelItem] = {}
         model = self.ctx.models.get(model_id)
         owner = context.owner
         prompt_id = config.owner_prompt_id if owner else config.chat_prompt_id
@@ -81,7 +81,7 @@ class Agent:
                     owner,
                     context.bot,
                     history,
-                    trace + ephemeral,
+                    [ephemeral.get(item.call_id, item) for item in trace],
                     self.budget(config, prompt_id, config.persona_id, tools),
                     profile_cache=profile_cache,
                 )
@@ -109,25 +109,25 @@ class Agent:
 
                 outputs = await asyncio.gather(*(execute(call) for call in result.tool_calls))
                 for call, output in zip(result.tool_calls, outputs):
+                    content = ()
                     if call.name == "ai.chat.view_message_images" and output.ok:
                         # The execution envelope stays typed; value is this plugin's JSON payload.
                         value = dict(output.value or {})
                         images = value.pop("images", [])
                         output = output.model_copy(update={"value": value})
                         if images:
-                            ephemeral.append(
-                                ModelItem(
-                                    role="user",
-                                    content=(
-                                        ModelPart(text=f"工具 {call.id} 返回的消息图片；仅用于本轮查看"),
-                                        *(
-                                            ModelPart(type="image", asset=AssetRef(data=data))
-                                            for data in images
-                                        ),
-                                    ),
-                                )
+                            content = (
+                                ModelPart(
+                                    text=f"读图工具返回的原群消息 {value['message_id']} 的图片，仅用于理解原话题。查看后不必描述画面；根据原群聊决定是否回复，也可保持沉默。"
+                                ),
+                                *(ModelPart(type="image", asset=AssetRef(data=data)) for data in images),
                             )
-                    trace.append(ModelItem.from_tool_result(output))
+                    item = ModelItem.from_tool_result(output, content=content)
+                    if content:
+                        # Overlay only this result while the turn runs; journals keep the text receipt.
+                        ephemeral[item.call_id] = item
+                        item = item.model_copy(update={"content": ()})
+                    trace.append(item)
                 checkpoint()
                 if silent and outputs[0].ok:
                     return None

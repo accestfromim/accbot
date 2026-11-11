@@ -238,6 +238,8 @@ ctx.schedule(event, datetime.now() + timedelta(hours=2))
 
 ModelItem 独立于 ChatMessage。插件自行把群消息和动态记忆组织成 ModelItem；普通 user 消息可填写 `sender: User`、`sent_at: datetime`、`message_id: str`、`conversation: ConversationRef`、`reply_to: ModelQuote`，字段均可选。`ModelItem.text(role, text, **metadata)` 支持这些字段，工具返回可用 `ModelItem.tool_result(call_id, output)` 构造。
 
+`ModelItem.tool_result(call_id, output=None, content=(...))` 与 `ModelItem.from_tool_result(result, content=(...))` 可附带 ModelPart 内容。图片、文件与说明绑定同一个工具调用；Chat 和 Responses 均由框架在本批工具回执之后生成补充 user 消息，不需要插件按模型卡分支。纯文本 content 留在工具结果内。媒体的持久化与保留时长仍由调用插件决定，详见 [工具返回的图片与文件](model-context.md#工具返回的图片与文件)。
+
 `ModelItem.from_message(message)` 提供默认转换，保留身份、群名片、时间、消息 ID 和单层引用快照，以文字占位符表示媒体，不触发网络读取。引用独立于窗口中的原消息，始终展示已有发送者和正文；框架查询不到原文时明确标记不可用，插件无需维护任何引用索引。自定义内容仍可直接构造 ModelItem。
 
 模型层把相邻的普通 user 消息渲染为同一条群聊历史消息，保留文字和多模态内容的顺序。system/developer、助手、工具调用、工具结果及原生供应商项目阻断合并并保持原样；不能只用 role 判断工具结果。`accbot.models.render_items(items)` 提供同一渲染过程；`count_tokens(items, tools=())` 提供包含元数据、工具和媒体预留的 token 预算估算，`count_text_tokens(text)` 对纯文本使用内置 DeepSeek V4.1 词表精确分词。框架不保存合并状态，不自动冻结此前请求；保持历史稳定由插件决定。详见 [群聊上下文](model-context.md)。

@@ -67,6 +67,35 @@ system/developer、助手、工具调用、工具结果和不透明供应商项�
 
 合并仅发生在请求编码阶段，不修改原 ModelItem 或插件的业务日志。模型输出及其 reasoning、工具关联和供应商字段仍原样续接；两个协议共享同一渲染过程。
 
+## 工具返回的图片与文件
+
+工具的结构化执行回执放在 `output`，图片、文件或补充文本用 `content` 表达，二者归属于同一个 `call_id`：
+
+```python
+item = ModelItem.from_tool_result(
+    result,
+    content=(
+        ModelPart(text="原消息的图片资料"),
+        ModelPart(type="image", asset=image_asset),
+    ),
+)
+```
+
+Chat 和 Responses 使用相同的上下文布局。框架先输出本批连续的工具回执，再插入一条 user 补充消息，其中依次标注各媒体所属的调用 ID、提供媒体，最后说明它们是原调用的附带结果，不是新的用户发言或请求。纯文本 content 直接留在工具结果内。协议编码只转换 text/input_text、image_url/input_image 等字段，不让插件依据模型卡选择媒体策略。
+
+```text
+user：原群聊记录
+assistant：读图调用 A、并行调用 B
+tool：A 的回执
+tool：B 的回执
+user：A 的图片补充资料及来源说明
+assistant：后续调用 C
+tool：C 的回执
+assistant：回答或继续选择工具
+```
+
+图片跟随对应的返回批次，后续轮次不会将其重新追加到末尾；并行调用的回执之间不插入 user 消息。编码不修改 ModelItem 或插件历史。官方聊天插件在单次处理期间保留按 call_id 索引的媒体结果，日志只保存文字回执；处理结束后释放媒体，下一次聊天与记忆整理不携带这些图片。
+
 ## 插件与缓存
 
 框架不记录“这段历史是否已发送”，不替调用方冻结块、添加假助手轮次或调整历史。若插件把 `[A, B]` 改成 `[A, B, C]`，框架就重新合并；是否这样做完全由插件决定。
