@@ -8,8 +8,8 @@ const numeric = [
   ["busy_seconds", "高频时间窗（秒）", 1, 3600, 1],
   ["cooldown_seconds", "普通唤醒冷却（秒）", 0, 3600, 1],
   ["idle_seconds", "会话空闲超时（秒）", 1, 86400, 1],
-  ["context_budget", "上下文预算", 4096, 2000000, 1],
-  ["output_reserve", "输出预留", 256, 200000, 1],
+  ["context_budget", "上下文预算（token）", 4096, 2000000, 1],
+  ["output_reserve", "输出预留（token）", 256, 200000, 1],
   ["max_tool_rounds", "聊天工具循环上限（不限制记忆整理）", 1, 256, 1],
 ];
 

@@ -16,7 +16,7 @@ class ModelCard(FrozenModel):
     model: str
     protocol: Literal["chat", "responses"] = "chat"
     api_key_env: str | None = None
-    timeout: float = Field(default=60, gt=0)
+    timeout: float = Field(default=300, gt=0, allow_inf_nan=False)
     capabilities: tuple[str, ...] = ("text", "tools")
     parameters: dict[str, Any] = Field(default_factory=dict)
 

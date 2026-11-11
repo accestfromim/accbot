@@ -1,8 +1,7 @@
 import json
-from typing import Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 from accbot import ModelItem
 
@@ -11,39 +10,31 @@ from .identity import MemoryKey
 from .storage import atomic_json
 
 
-class Member(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    qq: str = Field(min_length=1)
-    nickname: str
-    notes: list[str]
-
-
-class Memory(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    version: Literal[1]
-    summary: str
-    members: list[Member]
-    facts: list[str]
-    open_tasks: list[str]
-
-    @model_validator(mode="before")
-    @classmethod
-    def version_is_integer(cls, value):
-        if not isinstance(value, dict) or type(value.get("version")) is not int:
-            raise ValueError("记忆 version 必须是整数")
+def memory_text(value) -> str:
+    """Read Markdown, or render the previously stored JSON body without losing fields."""
+    if isinstance(value, str):
         return value
+    if not isinstance(value, dict) or type(value.get("version")) is not int or value["version"] != 1:
+        raise ValueError("无法识别记忆正文")
+    sections = [
+        ("概况", [value["summary"]] if value["summary"] else []),
+        (
+            "群内人物与关系",
+            [f"{m['nickname']}（用户 ID：{m['qq']}）：{'；'.join(m['notes'])}" for m in value["members"]],
+        ),
+        ("长期共识", value["facts"]),
+        ("待接续", value["open_tasks"]),
+    ]
+    return "\n\n".join(
+        f"## {title}\n" + "\n".join(f"- {row}" for row in rows) for title, rows in sections if rows
+    )
 
-    @model_validator(mode="after")
-    def check(self):
-        if isinstance(self.version, bool) or len({m.qq for m in self.members}) != len(self.members):
-            raise ValueError("记忆版本或成员无效")
-        if len(self.model_dump_json().encode()) > 65536:
-            raise ValueError("记忆超过 64 KiB")
-        return self
 
-
-def empty_memory():
-    return Memory(version=1, summary="", members=[], facts=[], open_tasks=[])
+def validate_memory(text: str) -> str:
+    text = text.strip()
+    if not text or len(text.encode("utf-8")) > 65536:
+        raise ValueError("群记忆需要非空 Markdown，最多 64 KiB")
+    return text
 
 
 class Record(BaseModel):
@@ -86,7 +77,7 @@ class Store:
                 state = json.loads(path.read_text("utf-8"))
                 self._verify(state)
                 current = {k: state[k] for k in ("memory", "last_record")}
-                Memory.model_validate(current["memory"])
+                current["memory"] = memory_text(current["memory"])
                 if memory is not None and current != memory:
                     raise ValueError(f"同一群存在多份不同的旧记忆，请先合并：{candidates}")
                 memory = current
@@ -123,12 +114,12 @@ class Store:
 
     def load(self):
         if not self.memory_path.exists():
-            return empty_memory()
+            return ""
         if self.memory_path.stat().st_size > 256 * 1024:
             raise ValueError("本地记忆文件过大")
         state = json.loads(self.memory_path.read_text("utf-8"))
         self._verify(state)
-        return Memory.model_validate(state["memory"])
+        return memory_text(state["memory"])
 
     def committed(self, record_id):
         if not self.memory_path.exists():
@@ -143,7 +134,7 @@ class Store:
             self.memory_path,
             {
                 **self.identity(),
-                "memory": memory.model_dump(),
+                "memory": validate_memory(memory),
                 "last_record": record_id,
             },
         )

@@ -6,6 +6,7 @@ from test_ai_plugins import MEMORY, deliver, event
 from test_ai_plugins import setup_ai as setup_ai
 
 from accbot import GenerationResult, ModelItem
+from accbot.models import count_tokens
 
 
 def module(plugin, name):
@@ -18,10 +19,10 @@ def fill_history(plugin, channel, usage):
     overhead = plugin.config.context_budget - plugin.agent.budget(
         plugin.config, plugin.config.chat_prompt_id, plugin.config.persona_id, plugin.tool_list()
     )
-    padding = usage - overhead - module(plugin, "context").cost(items)
+    padding = usage - overhead - count_tokens(items)
     assert padding > 0
     last = record.turns[-1][-1]
-    record.turns[-1][-1] = ModelItem.text("assistant", last.content[0].text + "x" * padding)
+    record.turns[-1][-1] = ModelItem.text("assistant", last.content[0].text + " x" * padding)
     channel.store.journal(channel.records)
 
 
@@ -49,9 +50,7 @@ def test_budget_event_compacts_before_next_turn_without_ending_session(setup_ai)
             assert "最早的群聊信息" in str(model.requests[-2][0])
             assert model.requests[-2][2]["tool_choice"] == "auto"
             assert "最早的群聊信息" not in str(model.requests[-1][0])
-            assert "新的问题" in str(model.requests[-1][0]) and MEMORY["summary"] in str(
-                model.requests[-1][0]
-            )
+            assert "新的问题" in str(model.requests[-1][0]) and MEMORY in str(model.requests[-1][0])
             assert "最早的群聊信息" not in channel.store.pending_path.read_text("utf-8")
             # A duplicate event cannot clear the new segment of the same active session.
             runtime.events.unsubscribe(observer)
@@ -85,7 +84,7 @@ def test_budget_event_after_reply_clears_journal_but_keeps_session_and_timer(set
             assert channel.idle_ticket == timer and not session.record.turns
             assert not channel.store.pending_path.exists()
             assert plugin.status()["active_sessions"] == 1 and plugin.status()["pending_memories"] == 0
-            assert channel.store.load().summary == MEMORY["summary"]
+            assert channel.store.load() == MEMORY
             assert model.requests[-1][2]["tool_choice"] == "auto"
             # Idle expiry of an already summarized empty session performs no extra model call.
             count = len(model.requests)
@@ -114,9 +113,7 @@ def test_messages_arriving_during_budget_summary_remain_in_order(setup_ai):
                     items=(
                         ModelItem.text(
                             "assistant",
-                            channel.store.load()
-                            .model_copy(update={"summary": "更新后的群记忆"})
-                            .model_dump_json(),
+                            "更新后的群记忆",
                         ),
                     )
                 )
@@ -160,7 +157,7 @@ def test_failed_budget_summary_keeps_history_and_retries_on_next_wake(setup_ai):
             assert not channel.store.memory_path.exists()
             await deliver(runtime, event("third"))
             assert channel.session is session and session.record.id != old_id
-            assert channel.store.load().summary == MEMORY["summary"]
+            assert channel.store.load() == MEMORY
             assert "必须保留的历史" not in channel.store.pending_path.read_text("utf-8")
         finally:
             await runtime.close()

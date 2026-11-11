@@ -111,8 +111,10 @@ export function field(label, name, value = "", options = {}) {
     readonly = false,
     required = false,
     list = "",
+    min,
+    step,
   } = options;
-  return `<label class="field"><span class="field-label">${esc(label)}${optional ? '<span class="optional">选填</span>' : ""}</span>${type === "password" ? '<div class="password-input">' : ""}<input class="input ${name === "id" ? "mono" : ""}" name="${name}" ${name === "id" ? 'pattern="[a-zA-Z0-9][a-zA-Z0-9_.\\-]*" title="使用英文字母、数字、点、下划线或连字符，并以字母或数字开头" maxlength="100"' : ""} value="${esc(value)}" type="${type}" placeholder="${esc(placeholder)}" ${readonly ? "readonly" : ""} ${required ? "required" : ""} ${list ? `list="${list}"` : ""} autocomplete="${type === "password" ? "new-password" : "off"}">${type === "password" ? `<button type="button" class="icon-button" data-password="${name}" aria-label="显示密钥">${icon("eye")}</button></div>` : ""}${help ? `<p class="field-help">${esc(help)}</p>` : ""}</label>`;
+  return `<label class="field"><span class="field-label">${esc(label)}${optional ? '<span class="optional">选填</span>' : ""}</span>${type === "password" ? '<div class="password-input">' : ""}<input class="input ${name === "id" ? "mono" : ""}" name="${name}" ${name === "id" ? 'pattern="[a-zA-Z0-9][a-zA-Z0-9_.\\-]*" title="使用英文字母、数字、点、下划线或连字符，并以字母或数字开头" maxlength="100"' : ""} value="${esc(value)}" type="${type}" placeholder="${esc(placeholder)}" ${readonly ? "readonly" : ""} ${required ? "required" : ""} ${min !== undefined ? `min="${esc(min)}"` : ""} ${step !== undefined ? `step="${esc(step)}"` : ""} ${list ? `list="${list}"` : ""} autocomplete="${type === "password" ? "new-password" : "off"}">${type === "password" ? `<button type="button" class="icon-button" data-password="${name}" aria-label="显示密钥">${icon("eye")}</button></div>` : ""}${help ? `<p class="field-help">${esc(help)}</p>` : ""}</label>`;
 }
 export function bindPasswords(root) {
   root.querySelectorAll("[data-password]").forEach(

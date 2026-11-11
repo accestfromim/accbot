@@ -9,6 +9,7 @@ from test_ai_plugins import setup_ai as setup_ai
 
 from accbot import GenerationResult, ModelItem, ModelQuote, ToolCall, ToolContext, User, UserRef
 from accbot.config import ModelCard
+from accbot.models import count_tokens
 from accbot.models.client import ModelClient
 from accbot.runtime import Runtime
 
@@ -34,7 +35,7 @@ def calls(*values):
 
 
 def final_memory():
-    return GenerationResult(items=(ModelItem.text("assistant", json.dumps(MEMORY)),))
+    return GenerationResult(items=(ModelItem.text("assistant", MEMORY),))
 
 
 def test_profiles_follow_users_across_groups_connections_reload_and_restart(setup_ai):
@@ -94,8 +95,7 @@ def test_profile_budget_counts_all_history_and_quotes_without_trimming(setup_ai)
             profiles.update(user(200), "OLD PROFILE " + "x" * 4000, "")
             profiles.update(user(201), "CURRENT PROFILE", "")
             profiles.update(user(202), "QUOTED PROFILE", "")
-            memory = module(plugin, "memory").empty_memory()
-            cost = module(plugin, "context").cost
+            memory = ""
             old = [ModelItem.text("user", "old", sender=User(ref=user(200), name="同名"))]
             current = [
                 ModelItem.text(
@@ -106,14 +106,14 @@ def test_profile_budget_counts_all_history_and_quotes_without_trimming(setup_ai)
                 )
             ]
             baseline = plugin.agent.context(memory, False, None, [], current, 100000)
-            budget = cost(baseline) + cost(old) + 10
+            budget = count_tokens(baseline) + count_tokens(old) + 10
             with pytest.raises(ValueError, match="预算"):
                 plugin.agent.context(memory, False, None, [old], current, budget)
             selected = plugin.agent.context(memory, False, None, [old], current, 100000)
             assert all(name in str(selected) for name in ("CURRENT PROFILE", "QUOTED PROFILE", "OLD PROFILE"))
             assert "OLD PROFILE" not in str(baseline)
             with pytest.raises(ValueError, match="预算"):
-                plugin.agent.context(memory, False, None, [], current, cost(current) + 10)
+                plugin.agent.context(memory, False, None, [], current, count_tokens(current) + 10)
             # IDs are path components, never filesystem paths supplied by the model.
             unusual = user("../../outside")
             profiles.update(unusual, "safe location", "")
@@ -139,7 +139,7 @@ def test_summary_loops_through_profile_tools_before_committing_group_memory(setu
             nonlocal step
             step += 1
             assert {t.id for t in tools} == {"ai.chat.update_user_profile"}
-            assert "必要时主动调用工具" in items[0].content[0].text
+            assert "先调用工具更新用户画像，再更新群聊记忆" in items[0].content[0].text
             assert "conflict=true" in items[0].content[0].text
             assert not channel.store.memory_path.exists()
             if step == 1:
@@ -164,7 +164,7 @@ def test_summary_loops_through_profile_tools_before_committing_group_memory(setu
             channel = next(iter(plugin.sessions.channels.values()))
             plugin.sessions.seal(channel)
             await runtime.jobs.drain()
-            assert step == 3 and channel.store.load().summary == MEMORY["summary"]
+            assert step == 3 and channel.store.load() == MEMORY
             assert not channel.records and not channel.store.pending_path.exists()
             assert not plugin.agent.profiles.path(user(201)).exists()
             assert not plugin.agent.profiles.path(user(299)).exists()
@@ -249,7 +249,7 @@ def test_summary_failure_keeps_profiles_and_retries_with_latest_snapshot(setup_a
             if requests == 1:
                 return calls(update(200, "# 长期偏好\n喜欢猫"))
             if requests == 2:
-                return GenerationResult(items=(ModelItem.text("assistant", "invalid group memory"),))
+                return GenerationResult(items=(ModelItem.text("assistant", " "),))
             assert "喜欢猫" in str(items) and "revision：" in str(items)
             assert not any(i.calls for i in items if i.kind == "message" and i.role == "assistant")
             return final_memory()
@@ -267,7 +267,7 @@ def test_summary_failure_keeps_profiles_and_retries_with_latest_snapshot(setup_a
             await runtime.jobs.drain()
             assert requests == 3 and not channel.records
             assert plugin.agent.profiles.read(user(200)) == profile
-            assert channel.store.load().summary == MEMORY["summary"]
+            assert channel.store.load() == MEMORY
         finally:
             await runtime.close()
 
@@ -370,7 +370,7 @@ def test_summary_profile_tools_use_real_provider_codecs(setup_ai, protocol):
                                 "finish_reason": "stop",
                                 "message": {
                                     "role": "assistant",
-                                    "content": json.dumps(MEMORY),
+                                    "content": MEMORY,
                                 },
                             }
                         ]
@@ -384,7 +384,7 @@ def test_summary_profile_tools_use_real_provider_codecs(setup_ai, protocol):
                         {
                             "type": "message",
                             "role": "assistant",
-                            "content": [{"type": "output_text", "text": json.dumps(MEMORY)}],
+                            "content": [{"type": "output_text", "text": MEMORY}],
                         }
                     ],
                 },
@@ -404,7 +404,7 @@ def test_summary_profile_tools_use_real_provider_codecs(setup_ai, protocol):
                 await runtime.jobs.drain()
                 assert len(requests) == 2 and not channel.records
                 assert "偏好茶" in plugin.agent.profiles.read(user(200)).content
-                assert channel.store.load().summary == MEMORY["summary"]
+                assert channel.store.load() == MEMORY
                 assert len(runtime.messages.adapters["main"].sent) == 1
             finally:
                 await runtime.close()
@@ -433,7 +433,7 @@ def test_summary_tool_loop_can_exceed_chat_limit(setup_ai):
             await runtime.jobs.drain()
             assert count == 36 and not channel.records and channel.retry_ticket is None
             assert not channel.store.pending_path.exists()
-            assert channel.store.load().summary == MEMORY["summary"]
+            assert channel.store.load() == MEMORY
             assert plugin.agent.profiles.read(user(200)).content == "画像已保存"
         finally:
             await runtime.close()
@@ -447,7 +447,7 @@ def test_summary_does_not_commit_when_profiles_leave_no_room_for_transcript(setu
         try:
             await deliver(runtime, event())
             channel = next(iter(plugin.sessions.channels.values()))
-            plugin.agent.profiles.update(user(200), "画像内容" * 1000, "")
+            plugin.agent.profiles.update(user(200), " x" * 7000, "")
             plugin.config = plugin.config.model_copy(update={"context_budget": 4096, "output_reserve": 512})
             plugin.sessions.seal(channel)
             await runtime.jobs.drain()

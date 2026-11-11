@@ -23,7 +23,7 @@ def normalize_endpoint(value: str) -> str:
     return value
 
 
-async def detect_protocol(http, endpoint: str, model: str, key: str | None = None):
+async def detect_protocol(http, endpoint: str, model: str, key: str | None = None, *, timeout: float = 300):
     endpoint = normalize_endpoint(endpoint)
     attempts = []
     for protocol in ("responses", "chat"):
@@ -33,7 +33,7 @@ async def detect_protocol(http, endpoint: str, model: str, key: str | None = Non
             endpoint=endpoint,
             model=model,
             protocol=protocol,
-            timeout=12,
+            timeout=timeout,
             api_key_env="PROBE" if key else None,
         )
         client = ModelClient(card, http, lambda _: key)

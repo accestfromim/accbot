@@ -73,7 +73,7 @@ system/developer、助手、工具调用、工具结果和不透明供应商项�
 
 官方聊天插件在正常调用后追加助手回复，或保留 stay_silent 工具调用和结果，因此下一批发言自然被分隔。渲染旧块时不插入当前时间、消息总数或重新编号；后续追加消息不会改变这些旧块。插件达到总预算的 95% 时发出记忆整理事件，成功后一次清除已总结历史，继续当前 session；不通过滑动窗口持续裁剪历史。预算口径和失败处理见 [AI 插件](ai-plugins.md#会话与模型上下文)。
 
-聊天插件的预算使用相同的 render_items，计算包含标签与引用正文的上下文大小。长期记忆使用独立 system 消息；业务日志保存未合并的结构化对象。
+聊天插件的预算调用框架 count_tokens，使用相同的 render_items，计算包含标签与引用正文的上下文 token 数。长期记忆使用独立 system 消息；业务日志保存未合并的结构化对象。
 
 缓存取决于实际供应商和模型。框架保证确定性的序列化与输出顺序，不承诺缓存命中；可以从 GenerationResult.usage 查看供应商返回的 cached_tokens。
 
@@ -98,3 +98,23 @@ result = await model.generate(raw, tools=tools)
 此时两个 user 消息保持分开。框架只解析 JSON 数组并编码请求，不添加记录标题、元数据或模板；system_prompt_id/persona_id 即使传入也直接忽略，不读取相应卡片。工具 Schema 仍根据 tools 生成，插件和工具提示词补充均不注入。模型卡参数、密钥引用、超时、异常处理和 GenerationResult 解析继续使用同一实现。
 
 普通自然语言字符串、以 `system:` 开头的文本、JSON 标量、包含完整请求的 JSON 对象以及非对象数组均报参数错误。不会猜测角色结构，也不会为原始消息自动做跨协议转换。
+
+## Token 预算计算
+
+```python
+from accbot import ModelItem
+from accbot.models import count_text_tokens, count_tokens
+
+text_tokens = count_text_tokens("群聊中的一段文本")
+system = ctx.prompts.render("chat", persona_id="default", tools=tools)
+input_tokens = count_tokens([ModelItem.text("system", system), *items], tools=tools)
+remaining = context_limit - input_tokens - output_reserve
+```
+
+`count_text_tokens` 使用随包提供的 DeepSeek V4.1 词表，无需远端 API、Transformers 或模型权重。Tokenizer 按需初始化一次；最多缓存 512 段不超过 8192 字符的文本，较长文本不驻留计数缓存。用户文本中拼写出的特殊控制标记仍按普通文本分词。
+
+`count_tokens` 接收 ModelItem 序列和可选工具列表，`protocol="chat"` 可改为 `"responses"` 以计入相应的消息和工具封装；供应商原生项目按其自身协议处理。它先按发送时的规则合并用户记录，再计入正文、角色字段、引用、调用参数、工具结果和工具 Schema；供应商原生输出及推理内容仅计一次。每条协议消息另预留 8 token；图片或文件每项预留 8192 token，不读取媒体、不把 Base64 当作文本分词。
+
+框架不在计数时自行选卡或追加提示词。调用者应传入展开后的系统提示词，并自行预留模型输出。原生 JSON 输入可以用 `count_text_tokens` 做文本统计，但这不等于远端实际使用的聊天模板计数。
+
+文本计数对应 DeepSeek V4.1，协议封装与媒体仍为预算估算，不能保证匹配其他模型或第三方端点。计费及实际使用量以 `GenerationResult.usage` 为准。默认 AI 插件采用此公共接口计算总预算，并保留原有的 95% 整理阈值。

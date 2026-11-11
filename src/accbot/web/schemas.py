@@ -21,6 +21,7 @@ class ModelDraft(BaseModel):
     key: SecretStr | None = None
     protocol: Literal["auto", "chat", "responses"] = "auto"
     description: str = ""
+    timeout: float = Field(default=300, gt=0, allow_inf_nan=False)
 
 
 class ProviderDraft(BaseModel):

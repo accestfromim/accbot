@@ -1,12 +1,11 @@
 import asyncio
-import json
 
 import pytest
-from test_ai_budget import module
-from test_ai_plugins import MEMORY, deliver, event
+from test_ai_plugins import deliver, event
 from test_ai_plugins import setup_ai as setup_ai
 
 from accbot import GenerationResult, ModelItem, ToolCall
+from accbot.models import count_tokens
 
 
 def padded_history(plugin, channel, *, overflow):
@@ -15,13 +14,13 @@ def padded_history(plugin, channel, *, overflow):
     record.turns = [[ModelItem.from_message(event(str(i), text=f"HISTORY_{i}").message)] for i in range(2)]
     budget = plugin.agent.budget(plugin.config, plugin.config.memory_prompt_id, None, plugin.memory_tools())
     baseline = plugin.agent.context(channel.store.load(), False, None, record.turns, [])
-    padding = (budget - module(plugin, "context").cost(baseline) + (4000 if overflow else -2000)) // 2
+    padding = (budget - count_tokens(baseline) + (4000 if overflow else -2000)) // 2
     for turn in record.turns:
         item = turn[0]
         turn[0] = item.model_copy(
             update={
                 "content": (
-                    item.content[0].model_copy(update={"text": item.content[0].text + "x" * padding}),
+                    item.content[0].model_copy(update={"text": item.content[0].text + " x" * padding}),
                 )
             }
         )
@@ -38,10 +37,8 @@ def memory_response(items, batches):
         for i in items
         if i.role == "system" and i.content[0].text.startswith("本会话长期记忆")
     )
-    previous = json.loads(background.split("\n", 1)[1])["summary"]
-    return GenerationResult(
-        items=(ModelItem.text("assistant", json.dumps({**MEMORY, "summary": previous + " ".join(batch)})),)
-    )
+    previous = background.split("\n", 1)[1]
+    return GenerationResult(items=(ModelItem.text("assistant", previous + " ".join(batch)),))
 
 
 @pytest.mark.parametrize("mode", ["budget", "idle"])
@@ -77,7 +74,7 @@ def test_oversized_summary_folds_prefixes_and_keeps_new_messages(setup_ai, mode)
                 assert not channel.records and not channel.store.pending_path.exists()
             assert batches == [["HISTORY_0"], ["HISTORY_1"]]
             assert record.id != old_id
-            assert channel.store.load().summary == "HISTORY_0HISTORY_1"
+            assert channel.store.load() == "HISTORY_0HISTORY_1"
         finally:
             await runtime.close()
 
@@ -88,7 +85,7 @@ def test_profile_tool_growth_folds_history_and_reads_saved_profile_on_retry(setu
     async def run():
         runtime, plugin, model = await setup_ai()
         batches, calls = [], 0
-        portrait = "SAVED_PROFILE " + "p" * 8000
+        portrait = "SAVED_PROFILE " + "p q r " * 1800
         try:
             await deliver(runtime, event())
             channel = next(iter(plugin.sessions.channels.values()))
@@ -122,7 +119,7 @@ def test_profile_tool_growth_folds_history_and_reads_saved_profile_on_retry(setu
             await plugin.sessions.request_compaction(channel, record, 2)
             assert calls == 3 and batches == [["HISTORY_0"], ["HISTORY_1"]]
             assert record.id != old_id and not record.turns
-            assert channel.store.load().summary == "HISTORY_0HISTORY_1"
+            assert channel.store.load() == "HISTORY_0HISTORY_1"
             assert plugin.agent.profiles.read(event().message.sender.ref).content == portrait
         finally:
             await runtime.close()
@@ -149,14 +146,14 @@ def test_partial_compaction_failure_is_not_mistaken_for_full_success(setup_ai):
             with pytest.raises(ValueError, match="记忆整理失败"):
                 await plugin.sessions.request_compaction(channel, record, 2)
             assert record.id != old_id and record.turns == [last]
-            assert channel.store.load().summary == "HISTORY_0"
+            assert channel.store.load() == "HISTORY_0"
             recovered = channel.store.recover()[0]
             assert recovered.id == record.id and "HISTORY_1" in str(recovered.turns)
             assert "HISTORY_0" not in str(recovered.turns)
             fail = False
             await plugin.sessions.request_compaction(channel, record, 1)
             assert batches == [["HISTORY_0"], ["HISTORY_1"]]
-            assert channel.store.load().summary == "HISTORY_0HISTORY_1" and not record.turns
+            assert channel.store.load() == "HISTORY_0HISTORY_1" and not record.turns
         finally:
             await runtime.close()
 

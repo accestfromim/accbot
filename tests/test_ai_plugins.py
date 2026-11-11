@@ -34,7 +34,7 @@ from accbot.runtime import Runtime
 from accbot.types import SendReceipt
 
 PLUGINS = ["ai.tools", "ai.chat"]
-MEMORY = {"version": 1, "summary": "群友喜欢猫", "members": [], "facts": [], "open_tasks": []}
+MEMORY = "群友喜欢猫"
 
 
 class Model:
@@ -58,8 +58,8 @@ class Model:
                 return await self.summary_responder(items, tools, options)
             if self.summary_failures:
                 self.summary_failures -= 1
-                return GenerationResult(items=(ModelItem.text("assistant", "invalid memory"),))
-            return GenerationResult(items=(ModelItem.text("assistant", json.dumps(MEMORY)),))
+                return GenerationResult(items=(ModelItem.text("assistant", " "),))
+            return GenerationResult(items=(ModelItem.text("assistant", MEMORY),))
         if self.responder:
             return await self.responder(items, tools, options)
         return GenerationResult(items=(ModelItem.text("assistant", "收到喵"),))
@@ -345,7 +345,7 @@ def test_group_gates_dedup_quote_memory_and_restart(setup_ai):
             await summarize(runtime, plugin)
             await runtime.jobs.drain()
             assert channel.session is None
-            assert channel.store.load().summary == "群友喜欢猫"
+            assert channel.store.load() == "群友喜欢猫"
             assert not channel.store.pending_path.exists()
             assert "我喜欢猫" in str(model.requests[-1][0])
             assert model.requests[-1][2]["tool_choice"] == "auto"
@@ -577,7 +577,7 @@ def test_failed_memory_retry_recovery_and_commit_marker(setup_ai):
             plugin.sessions.seal(channel)
             await runtime.jobs.drain()
             assert channel.store.pending_path.exists()
-            assert channel.store.load().summary == ""
+            assert channel.store.load() == ""
             assert channel.retry_delay == 120
             # Reload recovers pending work before the next conversation turn.
             assert not (await runtime.reload("ai.chat"))["failed"]
@@ -585,7 +585,7 @@ def test_failed_memory_retry_recovery_and_commit_marker(setup_ai):
             channel = next(iter(plugin.sessions.channels.values()))
             await summarize(runtime, plugin, reason="retry")
             await runtime.jobs.drain()
-            assert channel.store.load().summary == MEMORY["summary"]
+            assert channel.store.load() == MEMORY
             assert not channel.records
             # Simulate a crash between the atomic memory commit and journal cleanup.
             memory_module = importlib.import_module(plugin.__module__.rsplit(".", 1)[0] + ".memory")
@@ -884,10 +884,8 @@ def test_real_model_codecs_with_tool_loop_and_memory(setup_ai, protocol):
             body = json.loads(request.content)
             requests.append(body)
             if body.get("tool_choice") == "auto":
-                assert (body.get("response_format") if protocol == "chat" else body["text"]["format"]) == {
-                    "type": "json_object"
-                }
-                answer = json.dumps(MEMORY)
+                assert "response_format" not in body and "text" not in body
+                answer = MEMORY
             elif len(requests) == 1:
                 definitions = body["tools"]
                 tool = next(t for t in plugin.tool_list() if t.name == "send_text")
@@ -991,7 +989,7 @@ def test_real_model_codecs_with_tool_loop_and_memory(setup_ai, protocol):
                 channel = next(iter(plugin.sessions.channels.values()))
                 plugin.sessions.seal(channel)
                 await runtime.jobs.drain()
-                assert channel.store.load().summary == MEMORY["summary"]
+                assert channel.store.load() == MEMORY
                 assert not channel.store.pending_path.exists()
             finally:
                 await runtime.close()
@@ -1056,7 +1054,7 @@ def test_idle_timer_really_publishes_summary_event_without_polling(setup_ai):
                 await runtime.events.drain()
                 await runtime.jobs.drain()
             channel = next(iter(plugin.sessions.channels.values()))
-            assert channel.session is None and channel.store.load().summary == MEMORY["summary"]
+            assert channel.session is None and channel.store.load() == MEMORY
             assert "ai.chat.tick" not in runtime.events._types
         finally:
             await runtime.close()
@@ -1149,7 +1147,7 @@ def test_conflicting_legacy_group_memories_are_preserved(setup_ai):
                     json.dumps(
                         {
                             "conversation": conversation.model_dump(),
-                            "memory": {**MEMORY, "summary": summary},
+                            "memory": summary,
                             "last_record": name,
                         }
                     )
@@ -1249,7 +1247,7 @@ def test_ai_uses_selected_prompt_cards_without_group_control_tool_instructions(s
             plugin.sessions.seal(channel)
             await runtime.jobs.drain()
             memory_system = model.requests[-1][0][0].content[0].text
-            assert '"open_tasks"' in memory_system
+            assert "近期接续" in memory_system and "最终只返回完整的 Markdown" in memory_system
             assert "### 插件：" not in memory_system and "Bash" not in memory_system
         finally:
             await runtime.close()
@@ -1264,7 +1262,7 @@ def test_expanded_system_prompt_counts_toward_chat_budget(setup_ai):
         runtime, _, model = await setup_ai(context_budget=4096, output_reserve=512)
         try:
             original = runtime.prompts.get("chat")
-            large = SystemPromptCard(id="chat", name=original.name, content="x" * 6000)
+            large = SystemPromptCard(id="chat", name=original.name, content=" x" * 6000)
             await runtime.replace_prompts([large if c.id == "chat" else c for c in runtime.prompts.list()])
             await deliver(runtime, event())
             assert not model.requests  # Rejected locally rather than silently dropping the system prompt.

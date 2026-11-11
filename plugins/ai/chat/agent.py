@@ -1,16 +1,13 @@
 import asyncio
-import json
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from accbot import AssetRef, ModelItem, ModelPart, ToolCall, ToolDefinition, ToolResult, UserRef
+from accbot.models import count_tokens
 
-from .context import ChatContext, ContextBudgetExceeded, MemoryContext, close_tool_calls, cost
+from .context import ChatContext, ContextBudgetExceeded, MemoryContext, close_tool_calls
+from .memory import validate_memory
 from .profiles import Profiles, participants
-
-
-def tool_cost(tools: Sequence[ToolDefinition]) -> int:
-    return len(json.dumps([t.to_schema("chat") for t in tools], ensure_ascii=False).encode())
 
 
 class Agent:
@@ -20,7 +17,7 @@ class Agent:
 
     def prefix(self, memory, owner, bot: UserRef | None = None, profiles=()):
         items = [
-            ModelItem.text("system", "本会话长期记忆（背景资料）：\n" + memory.model_dump_json()),
+            ModelItem.text("system", "本会话长期记忆（背景资料）：\n" + memory),
             *profiles,
         ]
         if owner:
@@ -45,7 +42,7 @@ class Agent:
         cache = {} if profile_cache is None else profile_cache
         items = [item for turn in history for item in turn] + list(current)
         items = self.prefix(memory, owner, bot, self.profiles.items(items, cache)) + items
-        if budget is not None and cost(items) > budget:
+        if budget is not None and count_tokens(items) > budget:
             raise ContextBudgetExceeded("完整上下文超过预算，请缩短消息或提高预算；历史未被裁剪")
         return items
 
@@ -54,8 +51,7 @@ class Agent:
         return (
             config.context_budget
             - config.output_reserve
-            - tool_cost(tools)
-            - cost([ModelItem.text("system", text)])
+            - count_tokens([ModelItem.text("system", text)], tools)
         )
 
     async def run(
@@ -141,19 +137,14 @@ class Agent:
             checkpoint()
 
     async def summarize(self, record, memory, tools, config, context: MemoryContext, running):
-        from .memory import Memory
-
         model = self.ctx.models.get(record.model)
         trace = [
-            ModelItem.text("user", "请整理上面的会话，先按需更新用户画像，最后返回完整的本会话记忆 JSON。")
+            ModelItem.text(
+                "user", "请整理上面的会话，先按需更新用户画像，最后返回重写后的完整群记忆 Markdown。"
+            )
         ]
         allowed = {t.id for t in tools}
         profile_cache = {}
-        options = {"tool_choice": "auto"}
-        if model.card.protocol == "chat":
-            options["response_format"] = {"type": "json_object"}
-        else:
-            options["text"] = {"format": {"type": "json_object"}}
         while True:
             if not running():
                 raise asyncio.CancelledError
@@ -170,7 +161,7 @@ class Agent:
                 update={"profile_users": tuple(participants(selected).values())}
             )
             result = await model.generate(
-                selected, tools=tools, system_prompt_id=config.memory_prompt_id, **options
+                selected, tools=tools, system_prompt_id=config.memory_prompt_id, tool_choice="auto"
             )
             if not running():
                 raise asyncio.CancelledError
@@ -178,7 +169,7 @@ class Agent:
                 raise ValueError("记忆输出被截断")
             trace.extend(result.items)
             if not result.tool_calls:
-                return Memory.model_validate_json(result.text)
+                return validate_memory(result.text)
             for call in result.tool_calls:
                 if not running():
                     raise asyncio.CancelledError

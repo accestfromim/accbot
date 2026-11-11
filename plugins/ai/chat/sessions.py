@@ -11,11 +11,12 @@ from dataclasses import dataclass, field
 from uuid import uuid4
 
 from accbot import ChatMessage, ConversationRef, MessageChain, MessageReceived, MessageSent, ModelItem
+from accbot.models import count_tokens
 
-from .context import ChatContext, ContextBudgetExceeded, Entry, MemoryContext, cost
+from .context import ChatContext, ContextBudgetExceeded, Entry, MemoryContext
 from .events import SummarizeMemory
 from .identity import MemoryKey
-from .memory import Record, Store, empty_memory
+from .memory import Record, Store
 
 log = logging.getLogger(__name__)
 event_log = logging.getLogger("accbot.ai.chat.events")
@@ -228,7 +229,7 @@ class Sessions:
                 index = 0
             answer = await self.agent.run(
                 record.model,
-                channel.store.load() if persistent else empty_memory(),
+                channel.store.load() if persistent else "",
                 record.turns[:index],
                 trace,
                 tools,
@@ -268,7 +269,7 @@ class Sessions:
             self.config.persona_id,
             tools,
         )
-        return cost(items) >= budget - self.config.context_budget // 20
+        return count_tokens(items) >= budget - self.config.context_budget // 20
 
     async def request_compaction(self, channel, record, count):
         last = record.turns[count - 1]

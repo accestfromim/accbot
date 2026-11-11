@@ -1,13 +1,11 @@
-"""Typed chat context and conservative size estimation, independent of providers."""
+"""Typed chat context and interrupted tool-call recovery."""
 
-import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 
 from pydantic import Field
 
 from accbot import AssetRef, ChatMessage, ModelItem, ToolContext, UserRef
-from accbot.models import render_items
 
 
 class ChatContext(ToolContext):
@@ -33,18 +31,6 @@ class Entry:
     @property
     def images(self) -> tuple[AssetRef, ...]:
         return tuple(part.asset for part in self.message.content if part.type == "image")
-
-
-def cost(items: Sequence[ModelItem]) -> int:
-    total = 0
-    for item in render_items(items):
-        # Do not count encoded images as millions of text tokens.
-        data = item.model_dump(mode="json", exclude_none=True)
-        data["content"] = []
-        total += len(json.dumps(data, ensure_ascii=False).encode())
-        for part in item.content:
-            total += 8192 if part.type == "image" else len((part.text or "").encode())
-    return total
 
 
 def close_tool_calls(items: Sequence[ModelItem]) -> list[ModelItem]:

@@ -44,7 +44,11 @@ def create_router(runtime):
     @router.post("/detect")
     async def detect(body: ModelDraft):
         return await detect_protocol(
-            runtime.http, body.endpoint, body.model, resolve_key(runtime, body.id, body.key)
+            runtime.http,
+            body.endpoint,
+            body.model,
+            resolve_key(runtime, body.id, body.key),
+            timeout=body.timeout,
         )
 
     async def save(body, *, editing=False):
@@ -77,6 +81,7 @@ def create_router(runtime):
                 model=body.model,
                 protocol=protocol,
                 api_key_env=variable,
+                timeout=body.timeout,
                 parameters=previous.parameters if previous else {},
             )
             if new_key:

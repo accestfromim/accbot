@@ -99,7 +99,7 @@ class Example(Plugin):
 
 - [chat](../src/accbot/prompts/defaults/chat.md) 说明多人群聊中的参与时机、身份与指代、工具调用和回复规则。
 - [owner](../src/accbot/prompts/defaults/owner.md) 说明已校验的主人私聊中的任务理解、工具执行和结果核验。
-- [memory](../src/accbot/prompts/defaults/memory.md) 说明先按需更新用户画像、再整理会话记忆的顺序，以及记忆字段含义与信息取舍。
+- [memory](../src/accbot/prompts/defaults/memory.md) 说明先按需更新用户画像、再整理会话记忆的顺序，以及 Markdown 记忆的组织、重写、纠错、遗忘与篇幅取舍。
 
 源码中的模板用于初始化运行目录中的卡片；人格卡同样从 `src/accbot/personas/default.json` 初始化。`init` 或首次创建尚未初始化的运行时会保存初始卡片。此后前端编辑运行目录中的文件，更新源码模板或重复运行 `init` 不会覆盖已有卡片。若要采用更新后的模板，应通过前端更新正文，或同步到运行目录的对应文件。
 

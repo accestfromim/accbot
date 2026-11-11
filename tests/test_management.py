@@ -3,8 +3,10 @@ import shutil
 from pathlib import Path
 
 import httpx
+import pytest
 from fastapi.testclient import TestClient
 
+from accbot import ModelItem
 from accbot.config import ConfigStore, Settings
 from accbot.runtime import Runtime
 from accbot.web import create_app
@@ -69,6 +71,7 @@ def test_model_wizard_detects_chat_and_manages_credentials(workspace):
         assert probe.json()["endpoint"] == "https://model.test/v1"
         saved = client.post("/api/models/cards", json={**draft, "protocol": "chat"})
         assert saved.status_code == 201 and saved.json()["credential_configured"]
+        assert saved.json()["timeout"] == 300
         variable = saved.json()["api_key_env"]
         assert variable.startswith("ACCBOT_MODEL_MAIN_")
         assert runtime.store.get_secret(variable) == draft["key"]
@@ -82,6 +85,34 @@ def test_model_wizard_detects_chat_and_manages_credentials(workspace):
         assert client.delete(f"/api/secrets/{variable}").status_code == 200
         client.portal.call(http.aclose)
     assert len(calls) == 5
+
+
+@pytest.mark.parametrize("protocol", ["chat", "responses"])
+def test_model_timeout_round_trips_and_reaches_provider(workspace, protocol):
+    timeouts = []
+
+    def provider(request):
+        timeouts.append(request.extensions["timeout"])
+        if request.url.path.endswith("/responses"):
+            return httpx.Response(200, json={"output": [], "status": "completed"})
+        return httpx.Response(200, json={"choices": [{"message": {"content": "OK"}}]})
+
+    http = httpx.AsyncClient(transport=httpx.MockTransport(provider))
+    runtime = Runtime(workspace[1], http=http)
+    draft = {"id": "slow", "endpoint": "https://model.test/v1", "model": "test", "protocol": protocol}
+    with TestClient(create_app(runtime)) as client:
+        assert client.post("/api/models/cards", json=draft).json()["timeout"] == 300
+        draft["timeout"] = 900.5
+        assert client.put("/api/models/cards/slow", json=draft).json()["timeout"] == 900.5
+        assert client.get("/api/models").json()[0]["timeout"] == 900.5
+        assert ConfigStore(workspace[1]).load().models[0].timeout == 900.5
+        client.portal.call(runtime.models.get("slow").generate, [ModelItem.text("user", "hello")])
+        assert client.post("/api/models/detect", json=draft).status_code == 200
+        assert len(timeouts) == 2 and all(t["read"] == 900.5 for t in timeouts)
+        for invalid in (0, -1, "Infinity", "NaN"):
+            assert client.put("/api/models/cards/slow", json={**draft, "timeout": invalid}).status_code == 422
+        assert runtime.models.get("slow").card.timeout == 900.5
+        client.portal.call(http.aclose)
 
 
 def test_model_probe_responses_and_failure_do_not_leak_keys(workspace):
