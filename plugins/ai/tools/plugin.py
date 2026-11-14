@@ -16,6 +16,13 @@ from .network import PublicHTTP
 from .vision import load_images
 from .web import readable, search
 
+DownloadedPath = Annotated[
+    str,
+    Field(
+        description="将 download_url 成功结果中的 value.local_path 原样传入；不能填下载 URL 或单独的文件名。"
+    ),
+]
+
 
 class Plugin(BasePlugin):
     async def on_activate(self):
@@ -45,7 +52,7 @@ class Plugin(BasePlugin):
 
     @Tool(prompt_file="download_url.md")
     async def download_url(self, url: str, filename: str = ""):
-        """下载公开资源到受控目录，最多 50 MiB；local_path 可用于发送图片或群文件。"""
+        """下载公开资源到受控目录，最多 50 MiB；成功结果的 value.local_path 原样作为 send_file/send_image 的 path。"""
         body, content_type, final_url = await self.http.get(url, limit=50 * 1024 * 1024)
         name = filename or unquote(Path(urlsplit(final_url).path).name) or "download"
         if not re.fullmatch(r"[\w.\-]{1,160}", name) or name in {".", ".."}:
@@ -75,7 +82,7 @@ class Plugin(BasePlugin):
 
     @Tool(prompt_file="send_image.md")
     async def send_image(
-        self, path: str, ctx: ToolContext, caption: Annotated[str, Field(max_length=1000)] = ""
+        self, path: DownloadedPath, ctx: ToolContext, caption: Annotated[str, Field(max_length=1000)] = ""
     ):
         """发送受控下载目录中的图片，可附带简短说明。"""
         file = self.managed_file(path)
@@ -105,7 +112,7 @@ class Plugin(BasePlugin):
             return False
 
     @Tool(prompt_file="send_file.md")
-    async def send_file(self, path: str, ctx: ToolContext, filename: str = ""):
+    async def send_file(self, path: DownloadedPath, ctx: ToolContext, filename: str = ""):
         """把受控下载目录中的非图片资源上传到当前群聊。"""
         if ctx.conversation is None or ctx.conversation.kind != "group":
             raise ValueError("群文件工具只能在群聊使用")
