@@ -28,6 +28,8 @@
 | `ctx.messages.send_file(conversation, asset)` | 使用适配器的独立文件上传操作并发布 FileSent |
 | `ctx.messages.fetch(message_ref)` | 在适配器支持时查询消息；不发布新的接收事件，不支持或消息已失效时抛异常。入站引用由框架补齐，插件无需调用此接口补查 |
 | `ctx.messages.get_connection(id)` | 查询已配置的活动接入身份，返回不可变 ConnectionRef；不存在时返回 None，不暴露适配器对象 |
+| `ctx.messages.list_connections()` | 返回已启用的接入身份，可用于选择查询资料的连接 |
+| `await ctx.messages.lookup_name(conversation)` | 查询群名或私聊对象昵称。适配器没有资料时返回 None，连接及供应商错误沿用消息服务的异常 |
 | `ctx.tools.list()` | 当前活跃工具目录，调用插件自行筛选 |
 | `ToolDefinition.to_schema(protocol)` | 把内部工具声明编码为 chat/responses 的函数 Schema |
 | `await ctx.tools.execute(call, context)` | 参数验证、执行与工具结果 |

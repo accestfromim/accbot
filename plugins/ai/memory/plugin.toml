@@ -1,0 +1,6 @@
+id = "ai.memory"
+name = "AI · 记忆管理"
+version = "1.0.0"
+description = "按群名、昵称或 ID 查找并编辑群记忆和人物画像。"
+tags = ["ai", "memory"]
+requires = { "ai.chat" = ">=1,<2" }

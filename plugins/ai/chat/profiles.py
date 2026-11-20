@@ -2,7 +2,7 @@
 
 import hashlib
 from dataclasses import dataclass
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 from accbot import ModelItem, UserRef
 
@@ -44,6 +44,19 @@ class Profiles:
             directory /= "scope-" + part(key.scope)
         return directory / f"user-{part(key.id)}.md"
 
+    def users(self):
+        for file in self.directory.glob("**/user-*.md"):
+            parts = file.relative_to(self.directory).parts
+            if len(parts) not in (2, 3):
+                continue
+            user = UserRef(
+                platform=unquote(parts[0]),
+                scope=unquote(parts[1].removeprefix("scope-")) if len(parts) == 3 else "",
+                id=unquote(file.stem.removeprefix("user-")),
+            )
+            if self.path(user) == file and file.is_file():
+                yield user
+
     def read(self, user):
         path = self.path(user)
         try:
@@ -55,18 +68,13 @@ class Profiles:
             raise ValueError("用户画像超过 16 KiB")
         return Profile(data.decode("utf-8"), hashlib.sha256(data).hexdigest())
 
-    def update(self, user, content, revision):
+    def update(self, user, content, revision=None):
         if not content.strip() or len(content.encode("utf-8")) > MAX_PROFILE_BYTES:
             raise ValueError("用户画像需要非空 Markdown，最多 16 KiB")
-        current = self.read(user)
-        if current.revision != revision:
-            return {
-                "updated": False,
-                "conflict": True,
-                "revision": current.revision,
-            }
-        # No await between comparison and replacement: concurrent conversations cannot
-        # overwrite a newer portrait in this process using an obsolete revision.
+        if revision is not None:
+            current = self.read(user)
+            if current.revision != revision:
+                return {"updated": False, "conflict": True, "revision": current.revision}
         atomic_text(self.path(user), content)
         return {"updated": True, "revision": hashlib.sha256(content.encode("utf-8")).hexdigest()}
 

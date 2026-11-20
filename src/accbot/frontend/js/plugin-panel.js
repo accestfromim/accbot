@@ -99,7 +99,7 @@ export function openPluginPanel(plugin) {
       descriptor = await request(`${prefix}/ui`);
       if (closed) return;
       view.footer.querySelector(".plugin-panel-state").textContent =
-        descriptor.activation_id ? "已激活" : "未激活 · 可以提前配置";
+        descriptor.activation_id ? "已激活" : descriptor.has_settings ? "未激活 · 可以提前配置" : "未激活";
       const base = new URL(
         `/api/${prefix}/ui/assets/${descriptor.revision}/`,
         location.origin,
@@ -156,6 +156,11 @@ export function openPluginPanel(plugin) {
         onCleanup,
         assetUrl,
         notify,
+        request: (action, values = {}) =>
+          request(`${prefix}/ui/request`, {
+            method: "POST",
+            body: { revision: descriptor.revision, action, values },
+          }),
         listModels: () => request("models"),
         listPersonas: () => request("personas"),
         listPrompts: () => request("prompts"),

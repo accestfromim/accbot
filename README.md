@@ -55,6 +55,8 @@ accbot serve
 
 用户画像由记忆整理模型按需创建，每位用户一份 Markdown；QQ 用户跨群共用同一份画像。上下文自动读取窗口中用户的已有画像，总结时可通过工具更新画像，再保存群记忆。
 
+要在网页编辑这些文档，可一并启用 `ai.memory`，打开「插件 → AI · 记忆管理 → 配置」。可按群名、昵称或 ID 搜索，修改在下一个聊天轮次生效。
+
 ### OneBot 接入
 
 支持正向 WebSocket、反向 WebSocket 和 HTTP 上报。例如配置 ID 为 `qq-main` 时：
@@ -74,7 +76,7 @@ accbot serve
 ```text
 accbot/
 ├─ src/accbot/          # 框架、适配器、管理 API 和前端
-├─ plugins/ai/          # 默认聊天与工具插件
+├─ plugins/ai/          # 默认聊天、工具和记忆管理插件
 ├─ docs/                # 架构、接口和使用说明
 ├─ tests/               # 离线测试及夹具
 └─ .accbot/             # 本机运行数据，不提交到 Git

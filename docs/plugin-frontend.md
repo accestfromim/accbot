@@ -43,6 +43,7 @@ plugins/your-group/your-plugin/
 | `await api.listPrompts()` | 读取框架共享系统提示词卡，包含 id、name、description、content |
 | `await api.listConnections()` | 获取全部已保存的接入配置摘要，包括未激活配置；字段为 id、name、platform、enabled、status，不含凭据 |
 | `await api.getSettings()` | 调用本插件配置处理器的 read，返回插件定义的 JSON 对象 |
+| `await api.request(action, values = {})` | 在当前活跃插件上调用 `on_page_request(action, values)`，返回插件定义的 JSON 对象，适用于按需读取和编辑业务数据 |
 | `await api.saveSettings(values)` | 调用 write，返回插件确认保存的 JSON 对象，并显示保存结果 |
 | `api.notify(text, tone)` | 在侧栏显示提示，tone 支持 success、warn、error、info |
 | `api.assetUrl(path)` | 返回本插件当前版本的前端资源地址 |
@@ -121,6 +122,7 @@ class Settings(PluginSettings):
 | --- | --- |
 | `GET /api/plugins/{id}/ui` | 组件 HTML、版本、激活身份与可选 JS/CSS 信息 |
 | `GET /api/plugins/{id}/ui/assets/{revision}/{path}` | 当前页面版本的公开静态文件 |
+| `POST /api/plugins/{id}/ui/request` | 传入 `{revision, action, values}`。校验页面版本和激活身份后，只调用插件的 `on_page_request` 入口，由插件校验并分派操作 |
 | `GET /api/plugins/{id}/settings?revision=…` | 调用插件 read |
 | `PUT /api/plugins/{id}/settings` | 传入 `{revision, values}`，调用插件 write |
 

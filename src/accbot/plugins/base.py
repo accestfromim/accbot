@@ -5,6 +5,7 @@ from datetime import datetime, time, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ..errors import ErrorCode, FrameworkError
 from ..events import Event, EventOrigin
 from ..lifecycle import Activation
 from ..messages import PluginMessageSender
@@ -14,7 +15,7 @@ if TYPE_CHECKING:
 
 
 class Plugin:
-    """Lifecycle hooks only. Event methods are bound through @on_event / @on_message."""
+    """Lifecycle and management hooks. Subscribe to events with @on_event / @on_message."""
 
     def __init__(self, ctx: "PluginContext"):
         self.ctx = ctx
@@ -28,6 +29,10 @@ class Plugin:
     async def on_settings_changed(self, values: dict):
         """Called after plugin-owned configuration has been saved while active."""
         pass
+
+    async def on_page_request(self, action: str, values: dict) -> dict:
+        """Handle an explicit request from this active plugin's management page."""
+        raise FrameworkError(ErrorCode.UNSUPPORTED, "此插件未提供页面操作")
 
 
 class PluginContext:

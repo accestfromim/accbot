@@ -53,6 +53,7 @@ src/accbot/
 plugins/
 ├─ ai/
 │  ├─ chat/                # 群聊策略、工具循环、会话、记忆、配置页
+│  ├─ memory/              # 群记忆和人物画像的管理页
 │  └─ tools/               # 网络、文件、图片与消息工具
 └─ your-group/your-plugin/
    ├─ plugin.toml
@@ -60,7 +61,7 @@ plugins/
    └─ ...                    # 自有模块和静态资源
 ```
 
-两个 AI 插件均默认未激活，详情见 [AI 插件说明](ai-plugins.md)。`plugins/ai/` 纳入版本控制，其他本地插件默认忽略。测试用插件位于 `tests/fixtures/demo/`，不参与运行时插件发现。
+AI 插件默认未激活，详情见 [AI 插件说明](ai-plugins.md)。`plugins/ai/` 纳入版本控制，其他本地插件默认忽略。测试用插件位于 `tests/fixtures/demo/`，不参与运行时插件发现。
 
 人格卡由框架统一保存于 `.accbot/config/personas/`。系统提示词卡保存在 `.accbot/config/prompts/`。插件通过 `ctx.personas` 和 `ctx.prompts` 现场读取文件，并在 `model.generate` 中指定使用的 ID；管理页面提供编辑与导出。直接修改运行目录中的卡片在下一次模型调用生效，无需重启；模型、适配器或插件激活配置的保存不会覆盖这些编辑。
 
@@ -83,5 +84,7 @@ plugins/ai/chat/prompts/
 其他插件仍可自行组织 `images/` 等资源目录。纯资源插件设置 `kind = "resource"`，不需要 `plugin.py`；框架提供 ResourceBundle 快照，声明依赖的消费者读取相对路径。它与统一卡片目录是独立接口。
 
 插件需要复杂业务文件结构时，推荐在 `ctx.data_dir` 下自行划分 `config/`、`memory/`、`cache/` 等目录。框架仅分配该路径，不规定记忆格式，也不替插件管理业务存储。
+
+记忆管理插件将查到的群名和昵称缓存在 `ai.memory/names.json`，正文由聊天插件的公开接口直接读写原文件。
 
 自定义配置页放在插件包的 `frontend/index.html`，搭配可选的 `frontend/index.js`、`frontend/style.css`；配置读写由包根目录 `settings.py` 提供。AI 聊天插件将配置存入 `.accbot/data/plugins/ai.chat/config/settings.json`，群记忆存入 `ai.chat/memory/<稳定记忆身份哈希>/`，QQ 用户画像存入 `ai.chat/profiles/qq/user-<QQ号>.md`（其他平台按租户作用域进一步分目录）；网络工具下载存入 `ai.tools/downloads/`。详见 [插件配置页面](plugin-frontend.md) 与 [AI 插件](ai-plugins.md)。

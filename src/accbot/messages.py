@@ -38,6 +38,14 @@ class MessageSender:
         adapter = self.adapters.get(connection_id)
         return adapter.connection if adapter is not None else None
 
+    def list_connections(self) -> tuple[ConnectionRef, ...]:
+        return tuple(adapter.connection for adapter in self.adapters.values())
+
+    async def lookup_name(self, target: ConversationRef) -> str | None:
+        """Look up a group name or the nickname of a direct conversation's peer."""
+        lookup = getattr(self._adapter(target), "lookup_name", None)
+        return await lookup(target) if lookup else None
+
     def _adapter(self, target: ConversationRef) -> Adapter:
         adapter = self.adapters.get(target.connection_id)
         if adapter is None:
@@ -134,6 +142,12 @@ class PluginMessageSender:
 
     def get_connection(self, connection_id: str) -> ConnectionRef | None:
         return self._sender.get_connection(connection_id)
+
+    def list_connections(self) -> tuple[ConnectionRef, ...]:
+        return self._sender.list_connections()
+
+    async def lookup_name(self, target: ConversationRef) -> str | None:
+        return await self._sender.lookup_name(target)
 
     async def fetch(self, ref: MessageRef):
         return await self._sender.fetch(ref)

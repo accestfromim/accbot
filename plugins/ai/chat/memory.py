@@ -37,6 +37,12 @@ def validate_memory(text: str) -> str:
     return text
 
 
+def read_memory_state(path):
+    if path.stat().st_size > 256 * 1024:
+        raise ValueError("本地记忆文件过大")
+    return json.loads(path.read_text("utf-8"))
+
+
 class Record(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     id: str
@@ -115,9 +121,7 @@ class Store:
     def load(self):
         if not self.memory_path.exists():
             return ""
-        if self.memory_path.stat().st_size > 256 * 1024:
-            raise ValueError("本地记忆文件过大")
-        state = json.loads(self.memory_path.read_text("utf-8"))
+        state = read_memory_state(self.memory_path)
         self._verify(state)
         return memory_text(state["memory"])
 

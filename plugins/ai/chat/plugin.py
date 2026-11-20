@@ -5,6 +5,7 @@ from accbot import Plugin as BasePlugin
 
 from .agent import Agent
 from .context import ChatContext, MemoryContext
+from .documents import MemoryDocuments
 from .events import SummarizeMemory
 from .identity import MemoryKey
 from .owner_tools import OwnerTools
@@ -23,6 +24,7 @@ class Plugin(BasePlugin):
             self.ctx.prompts.get(key)
         self.network = self.ctx.plugins.require("ai.tools")
         self.agent = Agent(self.ctx)
+        self._documents = MemoryDocuments(self.ctx.data_dir, self.agent.profiles)
         self.sessions = Sessions(self)
         controls = OwnerTools(self.authorize_owner)
         for name in ("read_file", "write_file", "execute_shell"):
@@ -148,6 +150,15 @@ class Plugin(BasePlugin):
 
     def memory_tools(self):
         return tuple(t for t in self.ctx.tools.list() if t.id == "ai.chat.update_user_profile")
+
+    def list_memory_documents(self):
+        return self._documents.list()
+
+    def read_memory_document(self, token: str):
+        return self._documents.read(token)
+
+    def edit_memory_document(self, token: str, content: str):
+        return self._documents.edit(token, content)
 
     @Tool(prompt_file="update_user_profile.md")
     async def update_user_profile(self, user_id: str, content: str, ctx: MemoryContext, revision: str = ""):

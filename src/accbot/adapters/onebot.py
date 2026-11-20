@@ -36,6 +36,7 @@ from ..types import (
     SendReceipt,
     User,
     UserRef,
+    new_id,
 )
 from .onebot_message import parse_cq
 from .onebot_ws import run_forward
@@ -421,9 +422,22 @@ class OneBotAdapter:
         refs = (MessageRef(conversation=target, id=str(data["message_id"])),) if "message_id" in data else ()
         return SendReceipt(request_id=request_id, messages=refs)
 
-    async def fetch(self, ref, *, include_quote=True):
-        from ..types import new_id
+    async def lookup_name(self, target: ConversationRef) -> str | None:
+        if target.kind == "group":
+            action, identity, field = "get_group_info", "group_id", "group_name"
+        elif target.kind == "direct":
+            action, identity, field = "get_stranger_info", "user_id", "nickname"
+        else:
+            return None
+        if not target.id.isdecimal():
+            return None
+        data = await self.call(action, {identity: int(target.id)}, new_id())
+        if not isinstance(data, dict) or str(data.get(identity)) != target.id:
+            raise FrameworkError(ErrorCode.PROVIDER, "OneBot returned a different identity")
+        name = data.get(field)
+        return (name.strip() or None) if isinstance(name, str) else None
 
+    async def fetch(self, ref, *, include_quote=True):
         if ref.conversation.kind not in {"group", "direct"}:
             raise FrameworkError(ErrorCode.UNSUPPORTED, "unsupported OneBot message destination")
         result = await self.call("get_msg", {"message_id": ref.id}, new_id())
@@ -447,8 +461,6 @@ class OneBotAdapter:
         return event.message.model_copy(update={"ref": ref})
 
     async def resolve_asset(self, asset):
-        from ..types import new_id
-
         group_id = asset.metadata.get("group_id")
         if not group_id:
             raise FrameworkError(ErrorCode.UNSUPPORTED, "OneBot file URL lookup requires group metadata")
