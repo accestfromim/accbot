@@ -17,18 +17,40 @@
       <button type="button" class="button small" data-next>下一页</button>
     </nav>
   </section>
-  <section data-editor hidden>
-    <button type="button" class="button small" data-back>← 返回列表</button>
-    <header><h2 data-title></h2><p class="identity muted" data-identity></p></header>
-    <form>
-      <label class="field">
-        <span class="field-label" data-label></span>
-        <textarea class="input" rows="14" required disabled></textarea>
-      </label>
-      <p data-status role="status" aria-live="polite"></p>
-      <div class="editor-actions">
-        <button class="button primary" type="submit" disabled>保存修改</button>
+  <dialog class="document" aria-labelledby="document-title">
+    <header class="document-bar">
+      <button type="button" class="button" data-back>← 返回列表</button>
+      <div class="document-heading">
+        <h2 id="document-title"></h2>
+        <p class="identity muted" data-identity></p>
       </div>
-    </form>
-  </section>
+      <div class="document-actions">
+        <div class="switch" role="group" aria-label="文档视图">
+          <button type="button" data-mode="read" aria-pressed="true">阅读</button>
+          <button type="button" data-mode="edit" aria-pressed="false">编辑</button>
+        </div>
+        <button type="button" class="button primary" data-save hidden>保存修改</button>
+      </div>
+    </header>
+    <p data-status role="status"></p>
+    <div class="document-pages">
+      <section class="source-pane" aria-label="Markdown 编辑器">
+        <markdown-toolbar for="memory-source" aria-label="Markdown 格式">
+          <button type="button" data-md-button="header-2">标题</button>
+          <button type="button" data-md-button="bold">粗体</button>
+          <button type="button" data-md-button="unordered-list">列表</button>
+          <button type="button" data-md-button="quote">引用</button>
+          <button type="button" data-md-button="code">代码</button>
+          <button type="button" data-md-button="link">链接</button>
+        </markdown-toolbar>
+        <textarea id="memory-source" aria-label="Markdown 原文" dir="auto" spellcheck="false"></textarea>
+      </section>
+      <section class="preview-pane" aria-label="Markdown 文档">
+        <div class="preview-label">实时预览</div>
+        <div class="paper" tabindex="0" role="region" aria-label="渲染后的正文">
+          <article class="markdown-body"></article>
+        </div>
+      </section>
+    </div>
+  </dialog>
 </div>
